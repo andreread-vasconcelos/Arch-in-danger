@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Architect City Quest v2</title>
+<style>
+body { margin:0; background:#000; color:white; font-family:sans-serif; text-align:center; }
+canvas { background:#87CEEB; display:block; margin:auto; border:4px solid black; }
+</style>
+</head>
+<body>
+<h2>🏗️ Architect City Quest v2</h2>
+<p>⬅️➡️ Move | ⬆️ Jump | Collect 📜 Blueprints | Avoid ⚠️ Hazards | Collect 💰</p>
+<canvas id="game" width="960" height="480"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+// GAME DATA
+const gravity = 0.6;
+let cameraX = 0;
+let score = 0;
+let money = 0;
+let gameOver = false;
+
+// PLAYER
+let player = {x:50,y:300,w:30,h:40,vx:0,vy:0,onGround:false,lives:3,jetpack:false};
+
+// INPUT
+let keys = {};
+document.addEventListener("keydown",e=>keys[e.key]=true);
+document.addEventListener("keyup",e=>keys[e.key]=false);
+
+// LEVEL
+let platforms=[], blueprints=[], hazards=[], enemies=[], coins=[], checkpoints=[];
+for(let i=0;i<60;i++){
+  platforms.push({x:i*200,y:350-Math.random()*150,w:120,h:15});
+}
+for(let i=0;i<50;i++){
+  blueprints.push({x:200+i*180,y:200+Math.random()*150,w:18,h:18});
+  coins.push({x:250+i*180,y:250+Math.random()*120,w:12,h:12});
+}
+for(let i=0;i<30;i++){
+  hazards.push({x:400+i*300,y:360,w:50,h:25});
+}
+for(let i=0;i<15;i++){
+  enemies.push({x:600+i*400,y:330,w:30,h:30,dir:1});
+}
+for(let i=0;i<5;i++){
+  checkpoints.push({x:1000+i*1500,y:300,w:30,h:60,active:false});
+}
+
+// DEBRIS
+let debris=[];
+
+// COLLISION
+function collide(a,b){
+  return a.x < b.x+b.w && a.x+a.w > b.x &&
+         a.y < b.y+b.h && a.y+a.h > b.y;
+}
+
+// PLAYER HIT
+function playerHit(){
+  player.lives--;
+  player.x -= 100;
+  if(player.lives<=0){
+    gameOver="GAME OVER – OSHA FAIL";
+  }
+}
+
+// UPDATE
+function update(){
+  if(gameOver) return;
+
+  // MOVE
+  if(keys["ArrowRight"]) player.vx=4;
+  else if(keys["ArrowLeft"]) player.vx=-4;
+  else player.vx=0;
+
+  if(keys["ArrowUp"] && player.onGround){
+    player.vy=-12;
+    player.onGround=false;
+  }
+
+  // Jetpack power-up
+  if(player.jetpack && keys[" "]){
+    player.vy=-6;
+  }
+
+  // PHYSICS
+  player.vy+=gravity;
+  player.x+=player.vx;
+  player.y+=player.vy;
+
+  cameraX=player.x-250;
