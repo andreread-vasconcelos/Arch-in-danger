@@ -1,0 +1,75 @@
+name: Upgrade Arch in Danger jump
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/jump-upgrade.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-game:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add double jump
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('index.html')
+          s = p.read_text()
+
+          replacements = [
+            (
+              "  const keys = Object.create(null);\n",
+              "  const keys = Object.create(null);\n  let jumpPressed = false;\n"
+            ),
+            (
+              "    keys[e.key] = true;\n    if (['ArrowLeft','ArrowRight','ArrowUp',' '].includes(e.key)) e.preventDefault();",
+              "    keys[e.key] = true;\n    if (e.key === 'ArrowUp' && !e.repeat) jumpPressed = true;\n    if (['ArrowLeft','ArrowRight','ArrowUp',' '].includes(e.key)) e.preventDefault();"
+            ),
+            (
+              "    player={x:70,y:360,w:30,h:44,vx:0,vy:0,onGround:false,lives:3,jetpack:false,lastCheckpoint:70};",
+              "    player={x:70,y:360,w:30,h:44,vx:0,vy:0,onGround:false,lives:3,jetpack:false,lastCheckpoint:70,jumpsUsed:0};"
+            ),
+            (
+              "    player.x=player.lastCheckpoint;\n    player.y=240;\n    player.vx=0; player.vy=0;",
+              "    player.x=player.lastCheckpoint;\n    player.y=240;\n    player.vx=0; player.vy=0;\n    player.jumpsUsed=0;\n    jumpPressed=false;"
+            ),
+            (
+              "    if(keys.ArrowUp && player.onGround){ player.vy=-12.2; player.onGround=false; }",
+              "    if(jumpPressed && player.jumpsUsed < 2){\n      player.vy = player.jumpsUsed === 0 ? -12.2 : -11.5;\n      player.onGround=false;\n      player.jumpsUsed++;\n      jumpPressed=false;\n    }"
+            ),
+            (
+              "      player.y=groundY-player.h; player.vy=0; player.onGround=true;",
+              "      player.y=groundY-player.h; player.vy=0; player.onGround=true; player.jumpsUsed=0;"
+            ),
+            (
+              "        player.y=p.y-player.h; player.vy=0; player.onGround=true;",
+              "        player.y=p.y-player.h; player.vy=0; player.onGround=true; player.jumpsUsed=0;"
+            ),
+            (
+              "<kbd>←</kbd><kbd>→</kbd> move · <kbd>↑</kbd> jump · <kbd>Space</kbd> jetpack after pickup",
+              "<kbd>←</kbd><kbd>→</kbd> move · <kbd>↑</kbd> jump / double jump · <kbd>Space</kbd> jetpack after pickup"
+            )
+          ]
+
+          for old, new in replacements:
+            if old not in s:
+              raise SystemExit('Expected game code not found: ' + old[:80])
+            s = s.replace(old, new, 1)
+
+          p.write_text(s)
+          PY
+
+      - name: Commit gameplay change
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Make jump support double jump"
+          git push
