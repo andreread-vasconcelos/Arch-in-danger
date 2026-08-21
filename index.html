@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Arch in Danger — Architect City Quest</title>
+<style>
+  :root{color-scheme:dark}
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%;background:#0b0d10;color:#f5f7fa;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  body{display:flex;flex-direction:column;align-items:center;padding:18px;gap:12px}
+  .top{width:min(1100px,100%);display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
+  h1{font-size:clamp(22px,3vw,36px);margin:0;letter-spacing:.02em}
+  .sub{opacity:.72;margin-top:4px;font-size:14px}
+  .pill{font-size:12px;padding:7px 10px;border:1px solid #333;border-radius:999px;background:#15191f;white-space:nowrap}
+  .game-shell{width:min(1100px,100%);border:1px solid #272c33;border-radius:16px;overflow:hidden;background:#11151a;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+  canvas{display:block;width:100%;height:auto;aspect-ratio:2/1;background:#8fc9e8;image-rendering:auto}
+  .hud{display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center;padding:10px 12px;background:#11151a;border-top:1px solid #272c33;font-size:13px}
+  .stats{display:flex;flex-wrap:wrap;gap:12px}
+  .controls{opacity:.78}
+  .footer{width:min(1100px,100%);font-size:12px;opacity:.55;text-align:center}
+  kbd{background:#20262e;border:1px solid #3a424c;border-bottom-width:2px;border-radius:5px;padding:1px 5px;font:inherit}
+</style>
+</head>
+<body>
+  <div class="top">
+    <div>
+      <h1>🏗️ Arch in Danger</h1>
+      <div class="sub">Architect City Quest — collect blueprints, survive the site, reach the next checkpoint.</div>
+    </div>
+    <div class="pill">Recovered + completed from the original repository prototype</div>
+  </div>
+
+  <div class="game-shell">
+    <canvas id="game" width="1100" height="550" aria-label="Arch in Danger game"></canvas>
+    <div class="hud">
+      <div class="stats" id="stats"></div>
+      <div class="controls"><kbd>←</kbd><kbd>→</kbd> move · <kbd>↑</kbd> jump · <kbd>Space</kbd> jetpack after pickup · <kbd>R</kbd> restart</div>
+    </div>
+  </div>
+  <div class="footer">A small browser prototype restored from the deleted “Arch in danger / architect-city-quest” file.</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const stats = document.getElementById('stats');
+
+  const W = canvas.width, H = canvas.height;
+  const WORLD_W = 10400;
+  const gravity = 0.62;
+  const groundY = 505;
+  const keys = Object.create(null);
+
+  addEventListener('keydown', e => {
+    keys[e.key] = true;
+    if (['ArrowLeft','ArrowRight','ArrowUp',' '].includes(e.key)) e.preventDefault();
+    if ((e.key === 'r' || e.key === 'R')) resetGame();
+  });
+  addEventListener('keyup', e => keys[e.key] = false);
+
+  const rectHit = (a,b) => a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
+  const clamp = (v,a,b) => Math.max(a, Math.min(b,v));
+
+  let cameraX, score, money, gameOver, win, flash, frame;
+  let player, platforms, blueprints, hazards, enemies, coins, checkpoints, debris, jetpacks;
+
+  function seededNoise(n){
+    const x = Math.sin(n * 91.173 + 17.31) * 43758.5453;
+    return x - Math.floor(x);
+  }
+
+  function buildLevel(){
+    platforms = [];
+    blueprints = [];
+    hazards = [];
+    enemies = [];
+    coins = [];
+    checkpoints = [];
+    debris = [];
+    jetpacks = [];
+
+    // Ground islands / slabs.
+    for(let i=0;i<52;i++){
+      const x = 120 + i*195;
+      const y = 390 - seededNoise(i)*145;
+      const w = 105 + seededNoise(i+100)*85;
+      platforms.push({x,y,w,h:18,type:i%4});
+      if(i%2===0) blueprints.push({x:x+w*.45,y:y-28,w:22,h:22,collected:false});
+      if(i%2===1) coins.push({x:x+w*.55,y:y-32,w:14,h:14,collected:false});
+    }
+
+    // Some larger architectural terraces.
+    [1450,3150,5050,7000,8850].forEach((x,i)=>{
+      platforms.push({x,y:310-(i%2)*55,w:430,h:22,type:4});
+      checkpoints.push({x:x+360,y:235-(i%2)*55,w:24,h:75,active:false});
+    });
+
+    for(let i=0;i<28;i++){
+      const x = 520 + i*340;
+      hazards.push({x,y:groundY-22,w:48,h:22});
+    }
+    for(let i=0;i<14;i++){
+      enemies.push({x:850+i*650,y:groundY-34,w:34,h:34,dir:i%2?1:-1,minX:700+i*650,maxX:1080+i*650});
+    }
+
+    jetpacks.push({x:2650,y:230,w:28,h:34,collected:false});
+    jetpacks.push({x:7350,y:210,w:28,h:34,collected:false});
+  }
+
+  function resetGame(){
+    cameraX=0; score=0; money=0; gameOver=false; win=false; flash=0; frame=0;
+    player={x:70,y:360,w:30,h:44,vx:0,vy:0,onGround:false,lives:3,jetpack:false,lastCheckpoint:70};
+    buildLevel();
+  }
+
+  function respawn(){
+    player.lives--;
+    flash=18;
+    if(player.lives<=0){ gameOver=true; return; }
+    player.x=player.lastCheckpoint;
+    player.y=240;
+    player.vx=0; player.vy=0;
+  }
+
+  function addDebris(x,y,color){
+    for(let i=0;i<8;i++) debris.push({x,y,vx:(Math.random()-.5)*5,vy:-Math.random()*5-1,life:35+Math.random()*25,color});
+  }
+
+  function update(){
+    frame++;
+    if(gameOver || win) return;
+
+    player.vx = keys.ArrowRight ? 4.6 : keys.ArrowLeft ? -4.6 : player.vx*0.65;
+    if(Math.abs(player.vx)<0.08) player.vx=0;
+    if(keys.ArrowUp && player.onGround){ player.vy=-12.2; player.onGround=false; }
+    if(player.jetpack && keys[' ']) player.vy -= 0.9;
+
+    player.vy += gravity;
+    const prevY = player.y;
+    player.x += player.vx;
+    player.y += player.vy;
+    player.x = clamp(player.x,0,WORLD_W-player.w);
+    player.onGround=false;
+
+    // Ground.
+    if(player.y+player.h>=groundY && prevY+player.h<=groundY+12){
+      player.y=groundY-player.h; player.vy=0; player.onGround=true;
+    }
+
+    // One-way platform collision from above.
+    for(const p of platforms){
+      if(player.x+player.w>p.x && player.x<p.x+p.w && player.y+player.h>=p.y && prevY+player.h<=p.y+8 && player.vy>=0){
+        player.y=p.y-player.h; player.vy=0; player.onGround=true;
+      }
+    }
+
+    for(const b of blueprints){
+      if(!b.collected && rectHit(player,b)){ b.collected=true; score++; addDebris(b.x,b.y,'#69b7ff'); }
+    }
+    for(const c of coins){
+      if(!c.collected && rectHit(player,c)){ c.collected=true; money+=100; addDebris(c.x,c.y,'#ffd34d'); }
+    }
+    for(const j of jetpacks){
+      if(!j.collected && rectHit(player,j)){ j.collected=true; player.jetpack=true; addDebris(j.x,j.y,'#ff7d45'); }
+    }
+
+    for(const cp of checkpoints){
+      if(rectHit(player,cp)){
+        checkpoints.forEach(c=>c.active=false);
+        cp.active=true;
+        player.lastCheckpoint=cp.x;
+      }
+    }
+
+    for(const h of hazards){ if(rectHit(player,h)){ respawn(); break; } }
+
+    for(const e of enemies){
+      e.x += e.dir*1.35;
+      if(e.x<e.minX || e.x>e.maxX) e.dir*=-1;
+      if(rectHit(player,e)){ respawn(); break; }
+    }
+
+    if(player.y>H+180) respawn();
+    if(player.x>WORLD_W-250) win=true;
+
+    for(const d of debris){ d.x+=d.vx; d.y+=d.vy; d.vy+=.18; d.life--; }
+    debris = debris.filter(d=>d.life>0);
+
+    cameraX += ((player.x-300)-cameraX)*0.085;
+    cameraX = clamp(cameraX,0,WORLD_W-W);
+    if(flash>0) flash--;
+  }
+
+  function skyline(){
+    ctx.fillStyle='#bfd8e4';
+    ctx.fillRect(0,0,W,H);
+    ctx.save();
+    ctx.translate(-cameraX*.16,0);
+    for(let i=0;i<48;i++){
+      const x=i*270;
+      const bh=90+seededNoise(i+800)*200;
+      ctx.fillStyle=i%3===0?'#8ea3ad':'#9eb2bc';
+      ctx.fillRect(x,H-95-bh,150+seededNoise(i+900)*90,bh);
+      ctx.fillStyle='rgba(255,255,255,.25)';
+      for(let yy=H-80-bh; yy<H-110; yy+=24){
+        for(let xx=x+14; xx<x+130; xx+=28) ctx.fillRect(xx,yy,10,11);
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawPlayer(){
+    const x=player.x-cameraX,y=player.y;
+    ctx.save();
+    ctx.translate(x,y);
+    // architect body
+    ctx.fillStyle='#1d2d3c'; ctx.fillRect(6,13,18,23);
+    ctx.fillStyle='#e3b18d'; ctx.beginPath(); ctx.arc(15,8,7,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#f2f2f2'; ctx.fillRect(8,19,14,8);
+    ctx.fillStyle='#efb13d'; ctx.fillRect(6,0,18,4); ctx.fillRect(10,-4,10,5);
+    ctx.fillStyle='#18212a'; ctx.fillRect(7,35,7,9); ctx.fillRect(17,35,7,9);
+    if(player.jetpack){ ctx.fillStyle='#ff6a35'; ctx.fillRect(0,16,6,18); if(keys[' ']){ctx.fillStyle='#ffd15d';ctx.beginPath();ctx.moveTo(1,34);ctx.lineTo(5,34);ctx.lineTo(3,48+Math.sin(frame*.5)*4);ctx.fill();}}
+    ctx.restore();
+  }
+
+  function render(){
+    skyline();
+
+    // Far construction cranes.
+    ctx.save(); ctx.translate(-cameraX*.35,0); ctx.strokeStyle='rgba(45,61,72,.38)'; ctx.lineWidth=5;
+    for(let x=450;x<WORLD_W*.4;x+=1200){
+      ctx.beginPath();ctx.moveTo(x,80);ctx.lineTo(x,430);ctx.moveTo(x-140,105);ctx.lineTo(x+210,105);ctx.moveTo(x,105);ctx.lineTo(x+180,180);ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.save(); ctx.translate(-cameraX,0);
+
+    // ground
+    ctx.fillStyle='#464d53';ctx.fillRect(0,groundY,WORLD_W,H-groundY);
+    ctx.fillStyle='#626b71';ctx.fillRect(0,groundY,WORLD_W,5);
+
+    // platforms
+    for(const p of platforms){
+      ctx.fillStyle=p.type===4?'#e5e2d8':(p.type%2?'#d8d3c5':'#c9c5b9');
+      ctx.fillRect(p.x,p.y,p.w,p.h);
+      ctx.strokeStyle='#5f6263';ctx.lineWidth=2;ctx.strokeRect(p.x,p.y,p.w,p.h);
+      ctx.fillStyle='rgba(40,45,50,.3)';
+      for(let xx=p.x+18;xx<p.x+p.w-10;xx+=32)ctx.fillRect(xx,p.y+5,3,p.h-5);
+    }
+
+    // hazards
+    for(const h of hazards){
+      ctx.fillStyle='#ee5c44';ctx.fillRect(h.x,h.y,h.w,h.h);
+      ctx.fillStyle='#222';for(let i=0;i<4;i++)ctx.fillRect(h.x+i*14,h.y,7,h.h);
+    }
+
+    // checkpoints
+    for(const c of checkpoints){
+      ctx.fillStyle='#29333a';ctx.fillRect(c.x,c.y,c.w,c.h);
+      ctx.fillStyle=c.active?'#66ef89':'#f2b94b';ctx.fillRect(c.x+c.w,c.y+7,46,24);
+      ctx.fillStyle='#151a1e';ctx.font='12px system-ui';ctx.fillText(c.active?'SAFE':'SITE',c.x+c.w+7,c.y+23);
+    }
+
+    // enemies: inspection drones
+    for(const e of enemies){
+      ctx.fillStyle='#222a30';ctx.fillRect(e.x,e.y,e.w,e.h);
+      ctx.fillStyle='#f55';ctx.fillRect(e.x+7,e.y+10,6,6);ctx.fillRect(e.x+21,e.y+10,6,6);
+      ctx.strokeStyle='#222a30';ctx.beginPath();ctx.moveTo(e.x-8,e.y+8);ctx.lineTo(e.x+42,e.y+8);ctx.stroke();
+    }
+
+    for(const b of blueprints){
+      if(b.collected)continue;
+      ctx.fillStyle='#2d91e5';ctx.fillRect(b.x,b.y,b.w,b.h);
+      ctx.strokeStyle='white';ctx.lineWidth=1;ctx.strokeRect(b.x+4,b.y+4,b.w-8,b.h-8);
+      ctx.beginPath();ctx.moveTo(b.x+5,b.y+10);ctx.lineTo(b.x+17,b.y+10);ctx.moveTo(b.x+11,b.y+5);ctx.lineTo(b.x+11,b.y+17);ctx.stroke();
+    }
+    for(const c of coins){
+      if(c.collected)continue;
+      ctx.fillStyle='#ffd34d';ctx.beginPath();ctx.arc(c.x+c.w/2,c.y+c.h/2,c.w/2,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#8a6810';ctx.font='10px system-ui';ctx.fillText('$',c.x+4,c.y+11);
+    }
+    for(const j of jetpacks){
+      if(j.collected)continue;
+      ctx.fillStyle='#ff6f3d';ctx.fillRect(j.x,j.y,j.w,j.h);ctx.fillStyle='#fff';ctx.fillRect(j.x+8,j.y+7,12,17);
+    }
+
+    drawPlayer();
+
+    for(const d of debris){ctx.globalAlpha=clamp(d.life/50,0,1);ctx.fillStyle=d.color;ctx.fillRect(d.x,d.y,5,5)}
+    ctx.globalAlpha=1;
+    ctx.restore();
+
+    // overlay HUD inside canvas
+    ctx.fillStyle='rgba(10,14,18,.78)';ctx.fillRect(16,16,300,62);
+    ctx.fillStyle='#fff';ctx.font='bold 17px system-ui';ctx.fillText(`Blueprints ${score}   Money $${money}`,30,42);
+    ctx.font='14px system-ui';ctx.fillText(`Lives ${'♥'.repeat(Math.max(0,player.lives))}   ${player.jetpack?'Jetpack ✓':'Find the jetpack'}`,30,65);
+
+    if(flash){ctx.fillStyle=`rgba(255,65,50,${flash/45})`;ctx.fillRect(0,0,W,H)}
+
+    if(gameOver || win){
+      ctx.fillStyle='rgba(0,0,0,.7)';ctx.fillRect(0,0,W,H);
+      ctx.textAlign='center';ctx.fillStyle='#fff';ctx.font='700 44px system-ui';
+      ctx.fillText(win?'PROJECT DELIVERED!':'GAME OVER — OSHA FAIL',W/2,H/2-10);
+      ctx.font='18px system-ui';ctx.fillText('Press R to restart',W/2,H/2+28);ctx.textAlign='left';
+    }
+
+    stats.innerHTML = `<span>📜 ${score} blueprints</span><span>💰 $${money}</span><span>❤️ ${Math.max(0,player.lives)} lives</span><span>📍 ${Math.round(player.x)} / ${WORLD_W}</span>`;
+  }
+
+  function loop(){ update(); render(); requestAnimationFrame(loop); }
+  resetGame(); loop();
+})();
+</script>
+</body>
+</html>
