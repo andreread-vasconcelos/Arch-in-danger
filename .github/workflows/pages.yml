@@ -1,4 +1,4 @@
-name: Deploy Arch in Danger to GitHub Pages
+name: Finalize and deploy Arch in Danger
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -23,6 +23,75 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Build complete game into index.html
+        run: |
+          git apply --check .github/patches/boss_features.patch
+          git apply .github/patches/boss_features.patch
+          python .github/scripts/fix_audio.py
+          python .github/scripts/add_mobile_controls.py
+          python .github/scripts/ensure_boss_transition.py
+          python .github/scripts/tune_jetpack.py
+
+      - name: Verify excavator boss is in the actual game
+        run: |
+          grep -q "BOSS LEVEL: EXCAVATOR" index.html
+          grep -q "startBossLevel" index.html
+          grep -q "NORMAL_WORLD_END" index.html
+          grep -q "mobileControls" index.html
+          grep -q "player.y < 38" index.html
+
+      - name: Replace future deploy workflow with direct deploy
+        run: |
+          cat > .github/workflows/pages.yml <<'YAML'
+          name: Deploy Arch in Danger to GitHub Pages
+
+          on:
+            push:
+              branches: [main]
+            workflow_dispatch:
+
+          permissions:
+            contents: read
+            pages: write
+            id-token: write
+
+          concurrency:
+            group: github-pages
+            cancel-in-progress: true
+
+          jobs:
+            deploy:
+              environment:
+                name: github-pages
+                url: ${{ steps.deployment.outputs.page_url }}
+              runs-on: ubuntu-latest
+              steps:
+                - name: Checkout
+                  uses: actions/checkout@v4
+
+                - name: Configure Pages
+                  uses: actions/configure-pages@v5
+                  with:
+                    enablement: true
+
+                - name: Upload site
+                  uses: actions/upload-pages-artifact@v3
+                  with:
+                    path: .
+
+                - name: Deploy to GitHub Pages
+                  id: deployment
+                  uses: actions/deploy-pages@v4
+          YAML
+
+      - name: Commit the complete game source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html .github/workflows/pages.yml
+          git commit -m "Commit excavator boss level into playable game"
+          git push
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
