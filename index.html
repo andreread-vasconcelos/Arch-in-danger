@@ -52,10 +52,64 @@
   const groundY = 505;
   const keys = Object.create(null);
   let jumpPressed = false;
+  let audioCtx = null;
+
+  function ensureAudio(){
+    try{
+      if(!audioCtx){
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if(!AudioContextClass) return null;
+        audioCtx = new AudioContextClass();
+      }
+      if(audioCtx.state === 'suspended') audioCtx.resume();
+      return audioCtx;
+    }catch(e){
+      return null;
+    }
+  }
+
+  function playJumpSound(isDouble){
+    const ac = ensureAudio();
+    if(!ac) return;
+
+    const now = ac.currentTime;
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    const shimmer = ac.createOscillator();
+    const shimmerGain = ac.createGain();
+
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(isDouble ? 520 : 390, now);
+    osc.frequency.exponentialRampToValueAtTime(isDouble ? 800 : 620, now + 0.09);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.07, now + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+
+    shimmer.type = 'sine';
+    shimmer.frequency.setValueAtTime(isDouble ? 1040 : 780, now);
+    shimmer.frequency.exponentialRampToValueAtTime(isDouble ? 1320 : 980, now + 0.08);
+    shimmerGain.gain.setValueAtTime(0.0001, now);
+    shimmerGain.gain.exponentialRampToValueAtTime(isDouble ? 0.025 : 0.016, now + 0.01);
+    shimmerGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.11);
+
+    osc.connect(gain);
+    gain.connect(ac.destination);
+    shimmer.connect(shimmerGain);
+    shimmerGain.connect(ac.destination);
+
+    osc.start(now);
+    shimmer.start(now);
+    osc.stop(now + 0.15);
+    shimmer.stop(now + 0.12);
+  }
 
   addEventListener('keydown', e => {
     keys[e.key] = true;
-    if (e.key === 'ArrowUp' && !e.repeat) jumpPressed = true;
+    if (e.key === 'ArrowUp' && !e.repeat){
+      ensureAudio();
+      jumpPressed = true;
+    }
     if (['ArrowLeft','ArrowRight','ArrowUp',' '].includes(e.key)) e.preventDefault();
     if ((e.key === 'r' || e.key === 'R')) resetGame();
   });
@@ -136,8 +190,10 @@
     player.vx = keys.ArrowRight ? 4.6 : keys.ArrowLeft ? -4.6 : player.vx*0.65;
     if(Math.abs(player.vx)<0.08) player.vx=0;
     if(jumpPressed && player.jumpsUsed < 2){
+      const isDouble = player.jumpsUsed === 1;
       player.vy = player.jumpsUsed === 0 ? -12.2 : -11.5;
       player.onGround=false;
+      playJumpSound(isDouble);
       player.jumpsUsed++;
       jumpPressed=false;
     }
