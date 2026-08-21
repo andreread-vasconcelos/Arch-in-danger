@@ -14,7 +14,7 @@
   .sub{opacity:.72;margin-top:4px;font-size:14px}
   .pill{font-size:12px;padding:7px 10px;border:1px solid #333;border-radius:999px;background:#15191f;white-space:nowrap}
   .game-shell{width:min(1100px,100%);border:1px solid #272c33;border-radius:16px;overflow:hidden;background:#11151a;box-shadow:0 20px 60px rgba(0,0,0,.35)}
-  canvas{display:block;width:100%;height:auto;aspect-ratio:2/1;background:#8fc9e8;image-rendering:auto}
+  canvas{display:block;width:100%;height:auto;aspect-ratio:2/1;background:#8fc9e8}
   .hud{display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center;padding:10px 12px;background:#11151a;border-top:1px solid #272c33;font-size:13px}
   .stats{display:flex;flex-wrap:wrap;gap:12px}
   .controls{opacity:.78}
@@ -28,7 +28,7 @@
       <h1>🏗️ Arch in Danger</h1>
       <div class="sub">Architect City Quest — collect blueprints, survive the site, reach the next checkpoint.</div>
     </div>
-    <div class="pill">Recovered + completed from the original repository prototype</div>
+    <div class="pill">Stable camera build</div>
   </div>
 
   <div class="game-shell">
@@ -38,7 +38,7 @@
       <div class="controls"><kbd>←</kbd><kbd>→</kbd> move · <kbd>↑</kbd> jump / double jump · <kbd>Space</kbd> jetpack after pickup · <kbd>R</kbd> restart</div>
     </div>
   </div>
-  <div class="footer">A small browser prototype restored from the deleted “Arch in danger / architect-city-quest” file.</div>
+  <div class="footer">Arch in Danger — browser prototype.</div>
 
 <script>
 (() => {
@@ -46,13 +46,29 @@
   const ctx = canvas.getContext('2d');
   const stats = document.getElementById('stats');
 
-  const W = canvas.width, H = canvas.height;
+  const W = canvas.width;
+  const H = canvas.height;
   const WORLD_W = 10400;
   const gravity = 0.62;
   const groundY = 505;
   const keys = Object.create(null);
+
   let jumpPressed = false;
   let audioCtx = null;
+  let cameraX = 0;
+  let score = 0;
+  let money = 0;
+  let gameOver = false;
+  let win = false;
+  let flash = 0;
+  let frame = 0;
+
+  let player, platforms, blueprints, hazards, enemies, coins, checkpoints, debris, jetpacks;
+
+  const clamp = (v,a,b) => Math.max(a, Math.min(b,v));
+  const rectHit = (a,b) => a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
+  const sx = x => x - cameraX;
+  const visible = (x,w=0,pad=100) => sx(x)+w >= -pad && sx(x) <= W+pad;
 
   function ensureAudio(){
     try{
@@ -63,86 +79,64 @@
       }
       if(audioCtx.state === 'suspended') audioCtx.resume();
       return audioCtx;
-    }catch(e){
-      return null;
-    }
+    }catch(e){ return null; }
   }
 
   function playJumpSound(isDouble){
     const ac = ensureAudio();
     if(!ac) return;
-
     const now = ac.currentTime;
     const osc = ac.createOscillator();
     const gain = ac.createGain();
     const shimmer = ac.createOscillator();
     const shimmerGain = ac.createGain();
 
-    osc.type = 'square';
+    osc.type='square';
     osc.frequency.setValueAtTime(isDouble ? 520 : 390, now);
-    osc.frequency.exponentialRampToValueAtTime(isDouble ? 800 : 620, now + 0.09);
+    osc.frequency.exponentialRampToValueAtTime(isDouble ? 800 : 620, now+0.09);
+    gain.gain.setValueAtTime(0.0001,now);
+    gain.gain.exponentialRampToValueAtTime(0.07,now+0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001,now+0.14);
 
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.07, now + 0.008);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+    shimmer.type='sine';
+    shimmer.frequency.setValueAtTime(isDouble ? 1040 : 780,now);
+    shimmer.frequency.exponentialRampToValueAtTime(isDouble ? 1320 : 980,now+0.08);
+    shimmerGain.gain.setValueAtTime(0.0001,now);
+    shimmerGain.gain.exponentialRampToValueAtTime(isDouble ? 0.025 : 0.016,now+0.01);
+    shimmerGain.gain.exponentialRampToValueAtTime(0.0001,now+0.11);
 
-    shimmer.type = 'sine';
-    shimmer.frequency.setValueAtTime(isDouble ? 1040 : 780, now);
-    shimmer.frequency.exponentialRampToValueAtTime(isDouble ? 1320 : 980, now + 0.08);
-    shimmerGain.gain.setValueAtTime(0.0001, now);
-    shimmerGain.gain.exponentialRampToValueAtTime(isDouble ? 0.025 : 0.016, now + 0.01);
-    shimmerGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.11);
-
-    osc.connect(gain);
-    gain.connect(ac.destination);
-    shimmer.connect(shimmerGain);
-    shimmerGain.connect(ac.destination);
-
-    osc.start(now);
-    shimmer.start(now);
-    osc.stop(now + 0.15);
-    shimmer.stop(now + 0.12);
+    osc.connect(gain); gain.connect(ac.destination);
+    shimmer.connect(shimmerGain); shimmerGain.connect(ac.destination);
+    osc.start(now); shimmer.start(now);
+    osc.stop(now+0.15); shimmer.stop(now+0.12);
   }
 
   addEventListener('keydown', e => {
     keys[e.key] = true;
-    if (e.key === 'ArrowUp' && !e.repeat){
+    if(e.key === 'ArrowUp' && !e.repeat){
       ensureAudio();
       jumpPressed = true;
     }
-    if (['ArrowLeft','ArrowRight','ArrowUp',' '].includes(e.key)) e.preventDefault();
-    if ((e.key === 'r' || e.key === 'R')) resetGame();
+    if(['ArrowLeft','ArrowRight','ArrowUp',' '].includes(e.key)) e.preventDefault();
+    if(e.key === 'r' || e.key === 'R') resetGame();
   });
   addEventListener('keyup', e => keys[e.key] = false);
 
-  const rectHit = (a,b) => a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
-  const clamp = (v,a,b) => Math.max(a, Math.min(b,v));
-
-  let cameraX, score, money, gameOver, win, flash, frame;
-  let player, platforms, blueprints, hazards, enemies, coins, checkpoints, debris, jetpacks;
-
   function seededNoise(n){
-    const x = Math.sin(n * 91.173 + 17.31) * 43758.5453;
+    const x = Math.sin(n*91.173 + 17.31)*43758.5453;
     return x - Math.floor(x);
   }
 
   function buildLevel(){
-    platforms = [];
-    blueprints = [];
-    hazards = [];
-    enemies = [];
-    coins = [];
-    checkpoints = [];
-    debris = [];
-    jetpacks = [];
+    platforms=[]; blueprints=[]; hazards=[]; enemies=[]; coins=[]; checkpoints=[]; debris=[]; jetpacks=[];
 
     for(let i=0;i<52;i++){
-      const x = 120 + i*195;
-      const y = 390 - seededNoise(i)*145;
-      const w = 105 + seededNoise(i+100)*85;
+      const x=120+i*195;
+      const y=390-seededNoise(i)*145;
+      const w=105+seededNoise(i+100)*85;
       platforms.push({x,y,w,h:18,type:i%4});
       if(i%2===0) blueprints.push({x:x+w*.45,y:y-28,w:22,h:22,collected:false});
-      if(i%2===1) coins.push({x:x+w*.55,y:y-32,w:14,h:14,collected:false});
+      else coins.push({x:x+w*.55,y:y-32,w:14,h:14,collected:false});
     }
 
     [1450,3150,5050,7000,8850].forEach((x,i)=>{
@@ -151,9 +145,10 @@
     });
 
     for(let i=0;i<28;i++){
-      const x = 520 + i*340;
+      const x=520+i*340;
       hazards.push({x,y:groundY-22,w:48,h:22});
     }
+
     for(let i=0;i<14;i++){
       enemies.push({x:850+i*650,y:groundY-34,w:34,h:34,dir:i%2?1:-1,minX:700+i*650,maxX:1080+i*650});
     }
@@ -165,7 +160,12 @@
   function resetGame(){
     cameraX=0; score=0; money=0; gameOver=false; win=false; flash=0; frame=0;
     player={x:70,y:360,w:30,h:44,vx:0,vy:0,onGround:false,lives:3,jetpack:false,lastCheckpoint:70,jumpsUsed:0};
+    jumpPressed=false;
     buildLevel();
+  }
+
+  function snapCameraToPlayer(){
+    cameraX = clamp(player.x - W*0.30, 0, WORLD_W-W);
   }
 
   function respawn(){
@@ -174,9 +174,11 @@
     if(player.lives<=0){ gameOver=true; return; }
     player.x=player.lastCheckpoint;
     player.y=240;
-    player.vx=0; player.vy=0;
+    player.vx=0;
+    player.vy=0;
     player.jumpsUsed=0;
     jumpPressed=false;
+    snapCameraToPlayer();
   }
 
   function addDebris(x,y,color){
@@ -189,18 +191,20 @@
 
     player.vx = keys.ArrowRight ? 4.6 : keys.ArrowLeft ? -4.6 : player.vx*0.65;
     if(Math.abs(player.vx)<0.08) player.vx=0;
-    if(jumpPressed && player.jumpsUsed < 2){
-      const isDouble = player.jumpsUsed === 1;
-      player.vy = player.jumpsUsed === 0 ? -12.2 : -11.5;
+
+    if(jumpPressed && player.jumpsUsed<2){
+      const isDouble = player.jumpsUsed===1;
+      player.vy = isDouble ? -11.5 : -12.2;
       player.onGround=false;
       playJumpSound(isDouble);
       player.jumpsUsed++;
       jumpPressed=false;
     }
+
     if(player.jetpack && keys[' ']) player.vy -= 0.9;
 
     player.vy += gravity;
-    const prevY = player.y;
+    const prevY=player.y;
     player.x += player.vx;
     player.y += player.vy;
     player.x = clamp(player.x,0,WORLD_W-player.w);
@@ -246,123 +250,135 @@
     if(player.x>WORLD_W-250) win=true;
 
     for(const d of debris){ d.x+=d.vx; d.y+=d.vy; d.vy+=.18; d.life--; }
-    debris = debris.filter(d=>d.life>0);
+    debris=debris.filter(d=>d.life>0);
 
-    cameraX += ((player.x-300)-cameraX)*0.085;
-    cameraX = clamp(cameraX,0,WORLD_W-W);
+    const target=clamp(player.x-W*0.30,0,WORLD_W-W);
+    cameraX += (target-cameraX)*0.14;
+
+    const playerScreenX=player.x-cameraX;
+    if(playerScreenX<90) cameraX=clamp(player.x-90,0,WORLD_W-W);
+    if(playerScreenX>W-180) cameraX=clamp(player.x-(W-180),0,WORLD_W-W);
+
     if(flash>0) flash--;
   }
 
-  function skyline(){
-    ctx.fillStyle='#bfd8e4';
-    ctx.fillRect(0,0,W,H);
-    ctx.save();
-    ctx.translate(-cameraX*.16,0);
+  function drawSkyline(){
+    ctx.fillStyle='#bfd8e4';ctx.fillRect(0,0,W,H);
+    const parallax=cameraX*.16;
     for(let i=0;i<48;i++){
-      const x=i*270;
+      const x=i*270-parallax;
+      if(x>W+260 || x<-260) continue;
       const bh=90+seededNoise(i+800)*200;
-      ctx.fillStyle=i%3===0?'#8ea3ad':'#9eb2bc';
-      ctx.fillRect(x,H-95-bh,150+seededNoise(i+900)*90,bh);
+      const bw=150+seededNoise(i+900)*90;
+      ctx.fillStyle=i%3===0?'#8ea3ad':'#9eb2bc';ctx.fillRect(x,H-95-bh,bw,bh);
       ctx.fillStyle='rgba(255,255,255,.25)';
-      for(let yy=H-80-bh; yy<H-110; yy+=24){
-        for(let xx=x+14; xx<x+130; xx+=28) ctx.fillRect(xx,yy,10,11);
-      }
+      for(let yy=H-80-bh;yy<H-110;yy+=24){ for(let xx=x+14;xx<x+bw-12;xx+=28) ctx.fillRect(xx,yy,10,11); }
     }
-    ctx.restore();
+
+    const craneParallax=cameraX*.35;
+    ctx.strokeStyle='rgba(45,61,72,.38)';ctx.lineWidth=5;
+    for(let worldX=450;worldX<WORLD_W*.4;worldX+=1200){
+      const x=worldX-craneParallax;
+      if(x<-230 || x>W+230) continue;
+      ctx.beginPath();ctx.moveTo(x,80);ctx.lineTo(x,430);ctx.moveTo(x-140,105);ctx.lineTo(x+210,105);ctx.moveTo(x,105);ctx.lineTo(x+180,180);ctx.stroke();
+    }
   }
 
   function drawPlayer(){
-    const x=player.x,y=player.y;
-    ctx.save();
-    ctx.translate(x,y);
-    ctx.fillStyle='#1d2d3c'; ctx.fillRect(6,13,18,23);
-    ctx.fillStyle='#e3b18d'; ctx.beginPath(); ctx.arc(15,8,7,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#f2f2f2'; ctx.fillRect(8,19,14,8);
-    ctx.fillStyle='#efb13d'; ctx.fillRect(6,0,18,4); ctx.fillRect(10,-4,10,5);
-    ctx.fillStyle='#18212a'; ctx.fillRect(7,35,7,9); ctx.fillRect(17,35,7,9);
-    if(player.jetpack){ ctx.fillStyle='#ff6a35'; ctx.fillRect(0,16,6,18); if(keys[' ']){ctx.fillStyle='#ffd15d';ctx.beginPath();ctx.moveTo(1,34);ctx.lineTo(5,34);ctx.lineTo(3,48+Math.sin(frame*.5)*4);ctx.fill();}}
+    const x=sx(player.x), y=player.y;
+    ctx.save();ctx.translate(x,y);
+    ctx.fillStyle='#1d2d3c';ctx.fillRect(6,13,18,23);
+    ctx.fillStyle='#e3b18d';ctx.beginPath();ctx.arc(15,8,7,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#f2f2f2';ctx.fillRect(8,19,14,8);
+    ctx.fillStyle='#efb13d';ctx.fillRect(6,0,18,4);ctx.fillRect(10,-4,10,5);
+    ctx.fillStyle='#18212a';ctx.fillRect(7,35,7,9);ctx.fillRect(17,35,7,9);
+    if(player.jetpack){
+      ctx.fillStyle='#ff6a35';ctx.fillRect(0,16,6,18);
+      if(keys[' ']){ctx.fillStyle='#ffd15d';ctx.beginPath();ctx.moveTo(1,34);ctx.lineTo(5,34);ctx.lineTo(3,48+Math.sin(frame*.5)*4);ctx.fill();}
+    }
     ctx.restore();
   }
 
   function render(){
-    skyline();
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.globalAlpha=1;
+    ctx.clearRect(0,0,W,H);
+    drawSkyline();
 
-    ctx.save(); ctx.translate(-cameraX*.35,0); ctx.strokeStyle='rgba(45,61,72,.38)'; ctx.lineWidth=5;
-    for(let x=450;x<WORLD_W*.4;x+=1200){
-      ctx.beginPath();ctx.moveTo(x,80);ctx.lineTo(x,430);ctx.moveTo(x-140,105);ctx.lineTo(x+210,105);ctx.moveTo(x,105);ctx.lineTo(x+180,180);ctx.stroke();
-    }
-    ctx.restore();
-
-    ctx.save(); ctx.translate(-cameraX,0);
-
-    ctx.fillStyle='#464d53';ctx.fillRect(0,groundY,WORLD_W,H-groundY);
-    ctx.fillStyle='#626b71';ctx.fillRect(0,groundY,WORLD_W,5);
+    ctx.fillStyle='#464d53';ctx.fillRect(0,groundY,W,H-groundY);
+    ctx.fillStyle='#626b71';ctx.fillRect(0,groundY,W,5);
 
     for(const p of platforms){
-      ctx.fillStyle=p.type===4?'#e5e2d8':(p.type%2?'#d8d3c5':'#c9c5b9');
-      ctx.fillRect(p.x,p.y,p.w,p.h);
-      ctx.strokeStyle='#5f6263';ctx.lineWidth=2;ctx.strokeRect(p.x,p.y,p.w,p.h);
-      ctx.fillStyle='rgba(40,45,50,.3)';
-      for(let xx=p.x+18;xx<p.x+p.w-10;xx+=32)ctx.fillRect(xx,p.y+5,3,p.h-5);
+      if(!visible(p.x,p.w)) continue;
+      const x=sx(p.x);
+      ctx.fillStyle=p.type===4?'#e5e2d8':(p.type%2?'#d8d3c5':'#c9c5b9');ctx.fillRect(x,p.y,p.w,p.h);
+      ctx.strokeStyle='#5f6263';ctx.lineWidth=2;ctx.strokeRect(x,p.y,p.w,p.h);
+      ctx.fillStyle='rgba(40,45,50,.3)';for(let xx=x+18;xx<x+p.w-10;xx+=32)ctx.fillRect(xx,p.y+5,3,p.h-5);
     }
 
     for(const h of hazards){
-      ctx.fillStyle='#ee5c44';ctx.fillRect(h.x,h.y,h.w,h.h);
-      ctx.fillStyle='#222';for(let i=0;i<4;i++)ctx.fillRect(h.x+i*14,h.y,7,h.h);
+      if(!visible(h.x,h.w)) continue;
+      const x=sx(h.x);
+      ctx.fillStyle='#ee5c44';ctx.fillRect(x,h.y,h.w,h.h);ctx.fillStyle='#222';for(let i=0;i<4;i++)ctx.fillRect(x+i*14,h.y,7,h.h);
     }
 
     for(const c of checkpoints){
-      ctx.fillStyle='#29333a';ctx.fillRect(c.x,c.y,c.w,c.h);
-      ctx.fillStyle=c.active?'#66ef89':'#f2b94b';ctx.fillRect(c.x+c.w,c.y+7,46,24);
-      ctx.fillStyle='#151a1e';ctx.font='12px system-ui';ctx.fillText(c.active?'SAFE':'SITE',c.x+c.w+7,c.y+23);
+      if(!visible(c.x,c.w+50)) continue;
+      const x=sx(c.x);
+      ctx.fillStyle='#29333a';ctx.fillRect(x,c.y,c.w,c.h);ctx.fillStyle=c.active?'#66ef89':'#f2b94b';ctx.fillRect(x+c.w,c.y+7,46,24);
+      ctx.fillStyle='#151a1e';ctx.font='12px system-ui';ctx.fillText(c.active?'SAFE':'SITE',x+c.w+7,c.y+23);
     }
 
     for(const e of enemies){
-      ctx.fillStyle='#222a30';ctx.fillRect(e.x,e.y,e.w,e.h);
-      ctx.fillStyle='#f55';ctx.fillRect(e.x+7,e.y+10,6,6);ctx.fillRect(e.x+21,e.y+10,6,6);
-      ctx.strokeStyle='#222a30';ctx.beginPath();ctx.moveTo(e.x-8,e.y+8);ctx.lineTo(e.x+42,e.y+8);ctx.stroke();
+      if(!visible(e.x,e.w)) continue;
+      const x=sx(e.x);
+      ctx.fillStyle='#222a30';ctx.fillRect(x,e.y,e.w,e.h);ctx.fillStyle='#f55';ctx.fillRect(x+7,e.y+10,6,6);ctx.fillRect(x+21,e.y+10,6,6);
+      ctx.strokeStyle='#222a30';ctx.beginPath();ctx.moveTo(x-8,e.y+8);ctx.lineTo(x+42,e.y+8);ctx.stroke();
     }
 
     for(const b of blueprints){
-      if(b.collected)continue;
-      ctx.fillStyle='#2d91e5';ctx.fillRect(b.x,b.y,b.w,b.h);
-      ctx.strokeStyle='white';ctx.lineWidth=1;ctx.strokeRect(b.x+4,b.y+4,b.w-8,b.h-8);
-      ctx.beginPath();ctx.moveTo(b.x+5,b.y+10);ctx.lineTo(b.x+17,b.y+10);ctx.moveTo(b.x+11,b.y+5);ctx.lineTo(b.x+11,b.y+17);ctx.stroke();
+      if(b.collected || !visible(b.x,b.w)) continue;
+      const x=sx(b.x);
+      ctx.fillStyle='#2d91e5';ctx.fillRect(x,b.y,b.w,b.h);ctx.strokeStyle='white';ctx.lineWidth=1;ctx.strokeRect(x+4,b.y+4,b.w-8,b.h-8);
+      ctx.beginPath();ctx.moveTo(x+5,b.y+10);ctx.lineTo(x+17,b.y+10);ctx.moveTo(x+11,b.y+5);ctx.lineTo(x+11,b.y+17);ctx.stroke();
     }
+
     for(const c of coins){
-      if(c.collected)continue;
-      ctx.fillStyle='#ffd34d';ctx.beginPath();ctx.arc(c.x+c.w/2,c.y+c.h/2,c.w/2,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle='#8a6810';ctx.font='10px system-ui';ctx.fillText('$',c.x+4,c.y+11);
+      if(c.collected || !visible(c.x,c.w)) continue;
+      const x=sx(c.x);
+      ctx.fillStyle='#ffd34d';ctx.beginPath();ctx.arc(x+c.w/2,c.y+c.h/2,c.w/2,0,Math.PI*2);ctx.fill();ctx.fillStyle='#8a6810';ctx.font='10px system-ui';ctx.fillText('$',x+4,c.y+11);
     }
+
     for(const j of jetpacks){
-      if(j.collected)continue;
-      ctx.fillStyle='#ff6f3d';ctx.fillRect(j.x,j.y,j.w,j.h);ctx.fillStyle='#fff';ctx.fillRect(j.x+8,j.y+7,12,17);
+      if(j.collected || !visible(j.x,j.w)) continue;
+      const x=sx(j.x);
+      ctx.fillStyle='#ff6f3d';ctx.fillRect(x,j.y,j.w,j.h);ctx.fillStyle='#fff';ctx.fillRect(x+8,j.y+7,12,17);
     }
+
+    for(const d of debris){
+      if(!visible(d.x,5)) continue;
+      ctx.globalAlpha=clamp(d.life/50,0,1);ctx.fillStyle=d.color;ctx.fillRect(sx(d.x),d.y,5,5);
+    }
+    ctx.globalAlpha=1;
 
     drawPlayer();
-
-    for(const d of debris){ctx.globalAlpha=clamp(d.life/50,0,1);ctx.fillStyle=d.color;ctx.fillRect(d.x,d.y,5,5)}
-    ctx.globalAlpha=1;
-    ctx.restore();
 
     ctx.fillStyle='rgba(10,14,18,.78)';ctx.fillRect(16,16,300,62);
     ctx.fillStyle='#fff';ctx.font='bold 17px system-ui';ctx.fillText(`Blueprints ${score}   Money $${money}`,30,42);
     ctx.font='14px system-ui';ctx.fillText(`Lives ${'♥'.repeat(Math.max(0,player.lives))}   ${player.jetpack?'Jetpack ✓':'Find the jetpack'}`,30,65);
 
-    if(flash){ctx.fillStyle=`rgba(255,65,50,${flash/45})`;ctx.fillRect(0,0,W,H)}
+    if(flash){ctx.fillStyle=`rgba(255,65,50,${flash/45})`;ctx.fillRect(0,0,W,H);}
 
     if(gameOver || win){
-      ctx.fillStyle='rgba(0,0,0,.7)';ctx.fillRect(0,0,W,H);
-      ctx.textAlign='center';ctx.fillStyle='#fff';ctx.font='700 44px system-ui';
-      ctx.fillText(win?'PROJECT DELIVERED!':'GAME OVER — OSHA FAIL',W/2,H/2-10);
-      ctx.font='18px system-ui';ctx.fillText('Press R to restart',W/2,H/2+28);ctx.textAlign='left';
+      ctx.fillStyle='rgba(0,0,0,.7)';ctx.fillRect(0,0,W,H);ctx.textAlign='center';ctx.fillStyle='#fff';ctx.font='700 44px system-ui';
+      ctx.fillText(win?'PROJECT DELIVERED!':'GAME OVER — OSHA FAIL',W/2,H/2-10);ctx.font='18px system-ui';ctx.fillText('Press R to restart',W/2,H/2+28);ctx.textAlign='left';
     }
 
-    stats.innerHTML = `<span>📜 ${score} blueprints</span><span>💰 $${money}</span><span>❤️ ${Math.max(0,player.lives)} lives</span><span>📍 ${Math.round(player.x)} / ${WORLD_W}</span>`;
+    stats.innerHTML=`<span>📜 ${score} blueprints</span><span>💰 $${money}</span><span>❤️ ${Math.max(0,player.lives)} lives</span><span>📍 ${Math.round(player.x)} / ${WORLD_W}</span>`;
   }
 
-  function loop(){ update(); render(); requestAnimationFrame(loop); }
-  resetGame(); loop();
+  function loop(){update();render();requestAnimationFrame(loop);}
+  resetGame();loop();
 })();
 </script>
 </body>
