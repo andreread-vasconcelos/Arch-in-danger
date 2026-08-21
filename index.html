@@ -35,7 +35,7 @@
     <canvas id="game" width="1100" height="550" aria-label="Arch in Danger game"></canvas>
     <div class="hud">
       <div class="stats" id="stats"></div>
-      <div class="controls"><kbd>←</kbd><kbd>→</kbd> move · <kbd>↑</kbd> jump · <kbd>Space</kbd> jetpack after pickup · <kbd>R</kbd> restart</div>
+      <div class="controls"><kbd>←</kbd><kbd>→</kbd> move · <kbd>↑</kbd> jump / double jump · <kbd>Space</kbd> jetpack after pickup · <kbd>R</kbd> restart</div>
     </div>
   </div>
   <div class="footer">A small browser prototype restored from the deleted “Arch in danger / architect-city-quest” file.</div>
@@ -51,9 +51,11 @@
   const gravity = 0.62;
   const groundY = 505;
   const keys = Object.create(null);
+  let jumpPressed = false;
 
   addEventListener('keydown', e => {
     keys[e.key] = true;
+    if (e.key === 'ArrowUp' && !e.repeat) jumpPressed = true;
     if (['ArrowLeft','ArrowRight','ArrowUp',' '].includes(e.key)) e.preventDefault();
     if ((e.key === 'r' || e.key === 'R')) resetGame();
   });
@@ -110,7 +112,7 @@
 
   function resetGame(){
     cameraX=0; score=0; money=0; gameOver=false; win=false; flash=0; frame=0;
-    player={x:70,y:360,w:30,h:44,vx:0,vy:0,onGround:false,lives:3,jetpack:false,lastCheckpoint:70};
+    player={x:70,y:360,w:30,h:44,vx:0,vy:0,onGround:false,lives:3,jetpack:false,lastCheckpoint:70,jumpsUsed:0};
     buildLevel();
   }
 
@@ -121,6 +123,8 @@
     player.x=player.lastCheckpoint;
     player.y=240;
     player.vx=0; player.vy=0;
+    player.jumpsUsed=0;
+    jumpPressed=false;
   }
 
   function addDebris(x,y,color){
@@ -133,7 +137,12 @@
 
     player.vx = keys.ArrowRight ? 4.6 : keys.ArrowLeft ? -4.6 : player.vx*0.65;
     if(Math.abs(player.vx)<0.08) player.vx=0;
-    if(keys.ArrowUp && player.onGround){ player.vy=-12.2; player.onGround=false; }
+    if(jumpPressed && player.jumpsUsed < 2){
+      player.vy = player.jumpsUsed === 0 ? -12.2 : -11.5;
+      player.onGround=false;
+      player.jumpsUsed++;
+      jumpPressed=false;
+    }
     if(player.jetpack && keys[' ']) player.vy -= 0.9;
 
     player.vy += gravity;
@@ -145,13 +154,13 @@
 
     // Ground.
     if(player.y+player.h>=groundY && prevY+player.h<=groundY+12){
-      player.y=groundY-player.h; player.vy=0; player.onGround=true;
+      player.y=groundY-player.h; player.vy=0; player.onGround=true; player.jumpsUsed=0;
     }
 
     // One-way platform collision from above.
     for(const p of platforms){
       if(player.x+player.w>p.x && player.x<p.x+p.w && player.y+player.h>=p.y && prevY+player.h<=p.y+8 && player.vy>=0){
-        player.y=p.y-player.h; player.vy=0; player.onGround=true;
+        player.y=p.y-player.h; player.vy=0; player.onGround=true; player.jumpsUsed=0;
       }
     }
 
