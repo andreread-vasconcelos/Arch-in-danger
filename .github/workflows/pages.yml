@@ -24,8 +24,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Apply game build transforms
-        run: python .github/scripts/apply_walkthrough.py
+      - name: Apply current game build
+        run: |
+          git apply --check .github/patches/boss_features.patch
+          git apply .github/patches/boss_features.patch
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
