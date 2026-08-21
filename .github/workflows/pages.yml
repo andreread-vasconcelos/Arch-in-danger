@@ -29,6 +29,9 @@ jobs:
           git apply --check .github/patches/boss_features.patch
           git apply .github/patches/boss_features.patch
 
+      - name: Fix browser audio playback
+        run: python .github/scripts/fix_audio.py
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
         with:
