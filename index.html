@@ -20,6 +20,63 @@
   .controls{opacity:.78}
   .footer{width:min(1100px,100%);font-size:12px;opacity:.55;text-align:center}
   kbd{background:#20262e;border:1px solid #3a424c;border-bottom-width:2px;border-radius:5px;padding:1px 5px;font:inherit}
+
+  /* Phone / touch controls */
+  .mobile-controls{
+    display:none;
+    padding:12px;
+    background:#0e1318;
+    border-top:1px solid #272c33;
+    user-select:none;
+    -webkit-user-select:none;
+    -webkit-touch-callout:none;
+    touch-action:none;
+  }
+  .mobile-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .mobile-group{display:flex;align-items:center;gap:9px}
+  .mobile-btn{
+    appearance:none;
+    -webkit-appearance:none;
+    min-width:64px;
+    height:62px;
+    padding:0 13px;
+    border:1px solid #48515b;
+    border-bottom-width:3px;
+    border-radius:17px;
+    background:#202833;
+    color:#fff;
+    font:700 22px/1 system-ui,-apple-system,sans-serif;
+    box-shadow:0 4px 12px rgba(0,0,0,.28);
+    touch-action:none;
+  }
+  .mobile-btn span{display:block;font-size:10px;font-weight:600;opacity:.72;margin-top:5px;letter-spacing:.04em}
+  .mobile-btn.attack{background:#734029;border-color:#a56647}
+  .mobile-btn.jump{background:#22577a;border-color:#3c7ca5}
+  .mobile-btn.jet{background:#6a4b20;border-color:#9d7133}
+  .mobile-btn.utility{height:40px;min-width:auto;padding:0 14px;font-size:13px;border-radius:12px;background:#171d24}
+  .mobile-btn.active,.mobile-btn:active{transform:translateY(2px);border-bottom-width:1px;filter:brightness(1.25)}
+  .mobile-utility-row{display:flex;justify-content:center;gap:10px;margin-top:10px}
+  .mobile-hint{text-align:center;font-size:11px;opacity:.55;margin-top:8px}
+
+  @media (hover:none) and (pointer:coarse), (max-width:820px){
+    body{padding:0;gap:0}
+    .top{padding:10px 12px;align-items:center}
+    .top .pill{display:none}
+    .game-shell{width:100%;border-left:0;border-right:0;border-radius:0}
+    .hud{padding:8px 10px}
+    .controls{display:none}
+    .mobile-controls{display:block}
+    .footer{padding:8px 12px}
+    canvas{touch-action:none}
+  }
+
+  @media (max-width:520px){
+    h1{font-size:21px}
+    .sub{font-size:12px}
+    .mobile-btn{min-width:58px;height:58px;padding:0 10px;font-size:20px}
+    .mobile-group{gap:7px}
+    .mobile-row{gap:8px}
+  }
 </style>
 </head>
 <body>
@@ -28,7 +85,7 @@
       <h1>🏗️ Arch in Danger</h1>
       <div class="sub">Architect City Quest — collect blueprints, survive the site, reach the next checkpoint.</div>
     </div>
-    <div class="pill">Stable camera build</div>
+    <div class="pill">Boss + mobile + jetpack build</div>
   </div>
 
   <div class="game-shell">
@@ -36,6 +93,25 @@
     <div class="hud">
       <div class="stats" id="stats"></div>
       <div class="controls"><kbd>←</kbd><kbd>→</kbd> move · <kbd>↑</kbd> jump / double jump · <kbd>X</kbd> draw / swing blueprint tube · <kbd>Space</kbd> jetpack · <kbd>R</kbd> restart</div>
+    </div>
+
+    <div class="mobile-controls" id="mobileControls" aria-label="Touch game controls">
+      <div class="mobile-row">
+        <div class="mobile-group" aria-label="Walking controls">
+          <button class="mobile-btn" id="mobileLeft" type="button" aria-label="Walk left">◀<span>LEFT</span></button>
+          <button class="mobile-btn" id="mobileRight" type="button" aria-label="Walk right">▶<span>RIGHT</span></button>
+        </div>
+        <div class="mobile-group" aria-label="Action controls">
+          <button class="mobile-btn jump" id="mobileJump" type="button" aria-label="Jump or double jump">↑<span>JUMP</span></button>
+          <button class="mobile-btn attack" id="mobileAttack" type="button" aria-label="Swing blueprint tube">✕<span>HIT</span></button>
+          <button class="mobile-btn jet" id="mobileJet" type="button" aria-label="Use jetpack">▲<span>JET</span></button>
+        </div>
+      </div>
+      <div class="mobile-utility-row">
+        <button class="mobile-btn utility" id="mobileRestart" type="button">↻ Restart</button>
+        <button class="mobile-btn utility" id="mobileFullscreen" type="button">⛶ Full screen</button>
+      </div>
+      <div class="mobile-hint">Hold ◀ / ▶ to walk · tap JUMP twice for double jump · hold JET to fly · release to descend</div>
     </div>
   </div>
   <div class="footer">Arch in Danger — browser prototype.</div>
@@ -48,7 +124,10 @@
 
   const W = canvas.width;
   const H = canvas.height;
-  const WORLD_W = 10400;
+  const NORMAL_WORLD_END = 10150;
+  const BOSS_ARENA_START = 10450;
+  const BOSS_ARENA_END = 12000;
+  const WORLD_W = 12100;
   const gravity = 0.62;
   const groundY = 505;
   const keys = Object.create(null);
@@ -63,8 +142,13 @@
   let win = false;
   let flash = 0;
   let frame = 0;
+  let bossMode = false;
+  let bossDefeated = false;
+  let bossIntroTimer = 0;
+  let playerInvuln = 0;
+  let boss = null;
 
-  let player, platforms, blueprints, hazards, enemies, coins, checkpoints, debris, jetpacks;
+  let player, platforms, blueprints, hazards, enemies, coins, checkpoints, debris, jetpacks, stairs, mudPuddles, walkthroughBuildings;
 
   const clamp = (v,a,b) => Math.max(a, Math.min(b,v));
   const rectHit = (a,b) => a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
@@ -78,86 +162,194 @@
         if(!AudioContextClass) return null;
         audioCtx = new AudioContextClass();
       }
-      if(audioCtx.state === 'suspended') audioCtx.resume();
       return audioCtx;
-    }catch(e){ return null; }
+    }catch(e){
+      return null;
+    }
+  }
+
+  function unlockAudio(){
+    const ac=ensureAudio();
+    if(!ac) return;
+    try{
+      if(ac.state !== 'running'){
+        const resumeResult=ac.resume();
+        if(resumeResult && typeof resumeResult.catch === 'function') resumeResult.catch(()=>{});
+      }
+      const osc=ac.createOscillator();
+      const gain=ac.createGain();
+      const now=ac.currentTime;
+      gain.gain.setValueAtTime(0.00001,now);
+      osc.connect(gain); gain.connect(ac.destination);
+      osc.start(now); osc.stop(now+0.012);
+    }catch(e){}
+  }
+
+  function runWithAudio(buildSound){
+    const ac=ensureAudio();
+    if(!ac) return;
+    const play=()=>{
+      try{ buildSound(ac); }catch(e){}
+    };
+    if(ac.state === 'running'){
+      play();
+      return;
+    }
+    try{
+      const resumeResult=ac.resume();
+      if(resumeResult && typeof resumeResult.then === 'function'){
+        resumeResult.then(()=>play()).catch(()=>{});
+      }else{
+        setTimeout(play,0);
+      }
+    }catch(e){}
   }
 
   function playJumpSound(isDouble){
-    const ac = ensureAudio();
-    if(!ac) return;
-    const now = ac.currentTime;
-    const osc = ac.createOscillator();
-    const gain = ac.createGain();
-    const shimmer = ac.createOscillator();
-    const shimmerGain = ac.createGain();
+    runWithAudio(ac=>{
+      const now=ac.currentTime;
+      const osc=ac.createOscillator();
+      const gain=ac.createGain();
+      const shimmer=ac.createOscillator();
+      const shimmerGain=ac.createGain();
 
-    osc.type='square';
-    osc.frequency.setValueAtTime(isDouble ? 520 : 390, now);
-    osc.frequency.exponentialRampToValueAtTime(isDouble ? 800 : 620, now+0.09);
-    gain.gain.setValueAtTime(0.0001,now);
-    gain.gain.exponentialRampToValueAtTime(0.07,now+0.008);
-    gain.gain.exponentialRampToValueAtTime(0.0001,now+0.14);
+      osc.type='square';
+      osc.frequency.setValueAtTime(isDouble ? 520 : 390,now);
+      osc.frequency.exponentialRampToValueAtTime(isDouble ? 800 : 620,now+0.09);
+      gain.gain.setValueAtTime(0.0001,now);
+      gain.gain.exponentialRampToValueAtTime(0.085,now+0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001,now+0.14);
 
-    shimmer.type='sine';
-    shimmer.frequency.setValueAtTime(isDouble ? 1040 : 780,now);
-    shimmer.frequency.exponentialRampToValueAtTime(isDouble ? 1320 : 980,now+0.08);
-    shimmerGain.gain.setValueAtTime(0.0001,now);
-    shimmerGain.gain.exponentialRampToValueAtTime(isDouble ? 0.025 : 0.016,now+0.01);
-    shimmerGain.gain.exponentialRampToValueAtTime(0.0001,now+0.11);
+      shimmer.type='sine';
+      shimmer.frequency.setValueAtTime(isDouble ? 1040 : 780,now);
+      shimmer.frequency.exponentialRampToValueAtTime(isDouble ? 1320 : 980,now+0.08);
+      shimmerGain.gain.setValueAtTime(0.0001,now);
+      shimmerGain.gain.exponentialRampToValueAtTime(isDouble ? 0.03 : 0.020,now+0.01);
+      shimmerGain.gain.exponentialRampToValueAtTime(0.0001,now+0.11);
 
-    osc.connect(gain); gain.connect(ac.destination);
-    shimmer.connect(shimmerGain); shimmerGain.connect(ac.destination);
-    osc.start(now); shimmer.start(now);
-    osc.stop(now+0.15); shimmer.stop(now+0.12);
+      osc.connect(gain); gain.connect(ac.destination);
+      shimmer.connect(shimmerGain); shimmerGain.connect(ac.destination);
+      osc.start(now); shimmer.start(now);
+      osc.stop(now+0.15); shimmer.stop(now+0.12);
+    });
   }
 
   function playBlueprintSwing(){
-    const ac=ensureAudio();
-    if(!ac) return;
-    const now=ac.currentTime;
-    const osc=ac.createOscillator();
-    const gain=ac.createGain();
-    osc.type='triangle';
-    osc.frequency.setValueAtTime(300,now);
-    osc.frequency.exponentialRampToValueAtTime(115,now+0.09);
-    gain.gain.setValueAtTime(0.0001,now);
-    gain.gain.exponentialRampToValueAtTime(0.055,now+0.006);
-    gain.gain.exponentialRampToValueAtTime(0.0001,now+0.11);
-    osc.connect(gain); gain.connect(ac.destination);
-    osc.start(now); osc.stop(now+0.12);
+    runWithAudio(ac=>{
+      const now=ac.currentTime;
+      const osc=ac.createOscillator();
+      const gain=ac.createGain();
+      osc.type='triangle';
+      osc.frequency.setValueAtTime(300,now);
+      osc.frequency.exponentialRampToValueAtTime(115,now+0.09);
+      gain.gain.setValueAtTime(0.0001,now);
+      gain.gain.exponentialRampToValueAtTime(0.065,now+0.006);
+      gain.gain.exponentialRampToValueAtTime(0.0001,now+0.11);
+      osc.connect(gain); gain.connect(ac.destination);
+      osc.start(now); osc.stop(now+0.12);
+    });
   }
 
   function playBlueprintImpact(){
-    const ac=ensureAudio();
-    if(!ac) return;
-    const now=ac.currentTime;
-    const osc=ac.createOscillator();
-    const gain=ac.createGain();
-    osc.type='square';
-    osc.frequency.setValueAtTime(170,now);
-    osc.frequency.exponentialRampToValueAtTime(70,now+0.10);
-    gain.gain.setValueAtTime(0.0001,now);
-    gain.gain.exponentialRampToValueAtTime(0.08,now+0.004);
-    gain.gain.exponentialRampToValueAtTime(0.0001,now+0.13);
-    osc.connect(gain); gain.connect(ac.destination);
-    osc.start(now); osc.stop(now+0.14);
+    runWithAudio(ac=>{
+      const now=ac.currentTime;
+      const osc=ac.createOscillator();
+      const gain=ac.createGain();
+      osc.type='square';
+      osc.frequency.setValueAtTime(170,now);
+      osc.frequency.exponentialRampToValueAtTime(70,now+0.10);
+      gain.gain.setValueAtTime(0.0001,now);
+      gain.gain.exponentialRampToValueAtTime(0.09,now+0.004);
+      gain.gain.exponentialRampToValueAtTime(0.0001,now+0.13);
+      osc.connect(gain); gain.connect(ac.destination);
+      osc.start(now); osc.stop(now+0.14);
+    });
   }
 
   addEventListener('keydown', e => {
     keys[e.key] = true;
     if(e.key === 'ArrowUp' && !e.repeat){
-      ensureAudio();
+      unlockAudio();
       jumpPressed = true;
     }
     if((e.key === 'x' || e.key === 'X') && !e.repeat){
-      ensureAudio();
+      unlockAudio();
       attackPressed = true;
     }
     if(['ArrowLeft','ArrowRight','ArrowUp',' ','x','X'].includes(e.key)) e.preventDefault();
     if(e.key === 'r' || e.key === 'R') resetGame();
   });
   addEventListener('keyup', e => keys[e.key] = false);
+  addEventListener('pointerdown', unlockAudio, {passive:true});
+  addEventListener('touchstart', unlockAudio, {passive:true});
+
+  function setMobileActive(el,on){
+    if(!el) return;
+    el.classList.toggle('active',!!on);
+  }
+
+  function bindMobileHold(id,key){
+    const el=document.getElementById(id);
+    if(!el) return;
+    const down=e=>{
+      e.preventDefault();
+      unlockAudio();
+      keys[key]=true;
+      setMobileActive(el,true);
+      try{ if(e.pointerId!==undefined) el.setPointerCapture(e.pointerId); }catch(_){}
+    };
+    const up=e=>{
+      if(e) e.preventDefault();
+      keys[key]=false;
+      setMobileActive(el,false);
+    };
+    el.addEventListener('pointerdown',down);
+    el.addEventListener('pointerup',up);
+    el.addEventListener('pointercancel',up);
+    el.addEventListener('lostpointercapture',up);
+    el.addEventListener('contextmenu',e=>e.preventDefault());
+  }
+
+  function bindMobileTap(id,fn){
+    const el=document.getElementById(id);
+    if(!el) return;
+    el.addEventListener('pointerdown',e=>{
+      e.preventDefault();
+      unlockAudio();
+      setMobileActive(el,true);
+      fn();
+      try{ if(e.pointerId!==undefined) el.setPointerCapture(e.pointerId); }catch(_){}
+    });
+    const up=e=>{
+      if(e) e.preventDefault();
+      setMobileActive(el,false);
+    };
+    el.addEventListener('pointerup',up);
+    el.addEventListener('pointercancel',up);
+    el.addEventListener('lostpointercapture',up);
+    el.addEventListener('contextmenu',e=>e.preventDefault());
+  }
+
+  bindMobileHold('mobileLeft','ArrowLeft');
+  bindMobileHold('mobileRight','ArrowRight');
+  bindMobileHold('mobileJet',' ');
+  bindMobileTap('mobileJump',()=>{ jumpPressed=true; });
+  bindMobileTap('mobileAttack',()=>{ attackPressed=true; });
+  bindMobileTap('mobileRestart',()=>{ resetGame(); });
+  bindMobileTap('mobileFullscreen',()=>{
+    const shell=document.querySelector('.game-shell');
+    try{
+      if(document.fullscreenElement){ document.exitFullscreen(); }
+      else if(shell && shell.requestFullscreen){ shell.requestFullscreen(); }
+    }catch(_){}
+  });
+
+  addEventListener('blur',()=>{
+    keys.ArrowLeft=false;
+    keys.ArrowRight=false;
+    keys[' ']=false;
+    document.querySelectorAll('.mobile-btn.active').forEach(el=>el.classList.remove('active'));
+  });
 
   function seededNoise(n){
     const x = Math.sin(n*91.173 + 17.31)*43758.5453;
@@ -165,7 +357,13 @@
   }
 
   function buildLevel(){
-    platforms=[]; blueprints=[]; hazards=[]; enemies=[]; coins=[]; checkpoints=[]; debris=[]; jetpacks=[];
+    platforms=[]; blueprints=[]; hazards=[]; enemies=[]; coins=[]; checkpoints=[]; debris=[]; jetpacks=[]; stairs=[]; mudPuddles=[];
+
+    walkthroughBuildings=[
+      {x:1180,w:430,h:235,label:'STUDIO',tone:0},
+      {x:4050,w:520,h:285,label:'CIVIC HALL',tone:1},
+      {x:7650,w:470,h:255,label:'DESIGN LAB',tone:2}
+    ];
 
     for(let i=0;i<52;i++){
       const x=120+i*195;
@@ -187,10 +385,27 @@
     }
 
     for(let i=0;i<14;i++){
-      enemies.push({
+      const enemy={
         x:850+i*650,y:groundY-34,w:34,h:34,dir:i%2?1:-1,
         minX:700+i*650,maxX:1080+i*650,alive:true
-      });
+      };
+      enemies.push(enemy);
+      if(i%2===0){
+        mudPuddles.push({x:enemy.x-46,y:groundY-7,w:126,h:12});
+      }
+    }
+
+    const stairSpecs=[
+      {x:1900,count:5,dir:1},
+      {x:3500,count:6,dir:-1},
+      {x:5900,count:5,dir:1},
+      {x:8350,count:6,dir:-1}
+    ];
+    for(const spec of stairSpecs){
+      for(let i=0;i<spec.count;i++){
+        const riseIndex=spec.dir===1?i:(spec.count-1-i);
+        stairs.push({x:spec.x+i*40,y:groundY-18-riseIndex*18,w:42,h:18});
+      }
     }
 
     jetpacks.push({x:2650,y:230,w:28,h:34,collected:false});
@@ -198,7 +413,7 @@
   }
 
   function resetGame(){
-    cameraX=0; score=0; money=0; gameOver=false; win=false; flash=0; frame=0;
+    cameraX=0; score=0; money=0; gameOver=false; win=false; flash=0; frame=0; bossMode=false; bossDefeated=false; bossIntroTimer=0; playerInvuln=0; boss=null;
     player={x:70,y:360,w:30,h:44,vx:0,vy:0,onGround:false,lives:3,jetpack:false,lastCheckpoint:70,jumpsUsed:0,facing:1,attackTimer:0,attackImpactPlayed:false};
     jumpPressed=false;
     attackPressed=false;
@@ -207,6 +422,41 @@
 
   function snapCameraToPlayer(){
     cameraX = clamp(player.x - W*0.30, 0, WORLD_W-W);
+  }
+
+  function startBossLevel(){
+    if(bossMode || bossDefeated) return;
+    bossMode=true;
+    bossIntroTimer=120;
+    playerInvuln=120;
+    player.x=BOSS_ARENA_START+120;
+    player.y=groundY-player.h;
+    player.vx=0; player.vy=0;
+    player.lastCheckpoint=BOSS_ARENA_START+120;
+    player.jumpsUsed=0;
+    boss={
+      x:BOSS_ARENA_END-390,
+      y:groundY-108,
+      w:178,h:108,
+      hp:10,maxHp:10,
+      dir:-1,
+      attackCooldown:90,
+      slamTimer:0,
+      hitCooldown:0
+    };
+    cameraX=clamp(BOSS_ARENA_START-80,0,WORLD_W-W);
+  }
+
+  function bossBucketBox(){
+    if(!boss) return {x:-9999,y:-9999,w:1,h:1};
+    const slamming=boss.slamTimer>0;
+    const low=slamming && boss.slamTimer<24;
+    return {
+      x:boss.x-104,
+      y:low?groundY-58:boss.y+28,
+      w:88,
+      h:low?58:48
+    };
   }
 
   function respawn(){
@@ -223,6 +473,7 @@
     jumpPressed=false;
     attackPressed=false;
     snapCameraToPlayer();
+    playerInvuln=55;
   }
 
   function addDebris(x,y,color){
@@ -239,6 +490,11 @@
     if(keys.ArrowRight) player.facing=1;
     if(keys.ArrowLeft) player.facing=-1;
     if(Math.abs(player.vx)<0.08) player.vx=0;
+
+    const footBox={x:player.x+5,y:player.y+player.h-7,w:player.w-10,h:9};
+    for(const m of mudPuddles){
+      if(rectHit(footBox,m)){ player.vx*=0.50; break; }
+    }
 
     if(attackPressed && player.attackTimer<=0){
       player.attackTimer=11;
@@ -257,13 +513,21 @@
       jumpPressed=false;
     }
 
-    if(player.jetpack && keys[' ']) player.vy -= 0.9;
+    if(player.jetpack && keys[' ']){
+      player.vy -= 1.05;
+      if(player.vy < -5.4) player.vy = -5.4;
+    }
 
     player.vy += gravity;
     const prevY=player.y;
     player.x += player.vx;
     player.y += player.vy;
     player.x = clamp(player.x,0,WORLD_W-player.w);
+
+    if(player.jetpack && player.y < 38){
+      player.y = 38;
+      if(player.vy < 0) player.vy = 0;
+    }
     player.onGround=false;
 
     if(player.y+player.h>=groundY && prevY+player.h<=groundY+12){
@@ -271,6 +535,16 @@
       player.vy=0;
       player.onGround=true;
       player.jumpsUsed=0;
+    }
+
+    for(const st of stairs){
+      const feet=player.y+player.h;
+      if(player.x+player.w>st.x && player.x<st.x+st.w && player.vy>=0 && feet>=st.y-5 && feet<=st.y+24){
+        player.y=st.y-player.h;
+        player.vy=0;
+        player.onGround=true;
+        player.jumpsUsed=0;
+      }
     }
 
     for(const p of platforms){
@@ -326,6 +600,22 @@
           hitSomething=true;
         }
       }
+      if(bossMode && boss && bossIntroTimer<=0 && boss.hitCooldown<=0 && rectHit(attackBox,boss)){
+        boss.hp--;
+        boss.hitCooldown=18;
+        addDebris(boss.x+20,boss.y+45,'#f2b134');
+        addDebris(boss.x+40,boss.y+60,'#393f43');
+        money+=75;
+        hitSomething=true;
+        if(boss.hp<=0){
+          bossDefeated=true;
+          bossMode=false;
+          money+=1000;
+          addDebris(boss.x+boss.w/2,boss.y+boss.h/2,'#f2b134');
+          addDebris(boss.x+boss.w/2,boss.y+boss.h/2,'#222a30');
+          win=true;
+        }
+      }
       if(hitSomething && !player.attackImpactPlayed){
         playBlueprintImpact();
         player.attackImpactPlayed=true;
@@ -344,7 +634,39 @@
     }
 
     if(player.y>H+180) respawn();
-    if(player.x>WORLD_W-250) win=true;
+
+    if(!bossMode && !bossDefeated && player.x>=NORMAL_WORLD_END-40){
+      startBossLevel();
+    }
+
+    if(playerInvuln>0) playerInvuln--;
+
+    if(bossMode && boss){
+      if(bossIntroTimer>0){
+        bossIntroTimer--;
+      }else{
+        if(boss.hitCooldown>0) boss.hitCooldown--;
+        if(boss.slamTimer>0){
+          boss.slamTimer--;
+        }else{
+          boss.attackCooldown--;
+          if(boss.attackCooldown<=0){
+            boss.slamTimer=48;
+            boss.attackCooldown=95+Math.floor(Math.random()*55);
+          }else{
+            const targetX=clamp(player.x+260,BOSS_ARENA_START+500,BOSS_ARENA_END-250);
+            boss.x += Math.sign(targetX-boss.x)*0.72;
+          }
+        }
+        boss.x=clamp(boss.x,BOSS_ARENA_START+500,BOSS_ARENA_END-boss.w-40);
+
+        const bucket=bossBucketBox();
+        const dangerousBucket=boss.slamTimer>0 && boss.slamTimer<24;
+        if(playerInvuln<=0 && (rectHit(player,boss) || (dangerousBucket && rectHit(player,bucket)))){
+          respawn();
+        }
+      }
+    }
 
     for(const d of debris){
       d.x+=d.vx; d.y+=d.vy; d.vy+=.18; d.life--;
@@ -394,79 +716,188 @@
     }
   }
 
-  function drawPlayer(){
-  const x=sx(player.x), y=player.y;
-  ctx.save();
-  ctx.translate(x,y);
-
-  const attacking=player.attackTimer>0;
-
-  // Carry the rolled blueprint diagonally across the BACK when idle/walking.
-  // It is drawn before the body so it cannot read as a front-facing object.
-  if(!attacking){
-    ctx.save();
-    ctx.translate(15,22);
-    if(player.facing===-1) ctx.scale(-1,1);
-    ctx.rotate(-0.92);
-    ctx.lineCap='round';
-    ctx.strokeStyle='#155f9f';ctx.lineWidth=8;
-    ctx.beginPath();ctx.moveTo(-13,0);ctx.lineTo(20,0);ctx.stroke();
-    ctx.strokeStyle='#58aeea';ctx.lineWidth=5;
-    ctx.beginPath();ctx.moveTo(-11,0);ctx.lineTo(18,0);ctx.stroke();
-    ctx.fillStyle='#f3f6f8';
-    ctx.beginPath();ctx.arc(-14,0,4,0,Math.PI*2);ctx.fill();
-    ctx.beginPath();ctx.arc(21,0,4,0,Math.PI*2);ctx.fill();
-    ctx.restore();
-
-    // Shoulder strap helps the tube read clearly as back-carried equipment.
-    ctx.strokeStyle='#6c4c2d';ctx.lineWidth=2;
-    ctx.beginPath();ctx.moveTo(9,15);ctx.lineTo(21,31);ctx.stroke();
+  function playerInsideWalkthroughBuilding(b){
+    const cx=player.x+player.w/2;
+    return cx>b.x+18 && cx<b.x+b.w-18 && player.y+player.h>groundY-b.h+24;
   }
 
-  // Architect body sits in front of the back-carried blueprint.
-  ctx.fillStyle='#1d2d3c'; ctx.fillRect(6,13,18,23);
-  ctx.fillStyle='#e3b18d'; ctx.beginPath(); ctx.arc(15,8,7,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle='#f2f2f2'; ctx.fillRect(8,19,14,8);
-  ctx.fillStyle='#efb13d'; ctx.fillRect(6,0,18,4); ctx.fillRect(10,-4,10,5);
-  ctx.fillStyle='#18212a'; ctx.fillRect(7,35,7,9); ctx.fillRect(17,35,7,9);
-
-  if(player.jetpack){
-    ctx.fillStyle='#ff6a35'; ctx.fillRect(0,16,6,18);
-    if(keys[' ']){
-      ctx.fillStyle='#ffd15d';
-      ctx.beginPath();
-      ctx.moveTo(1,34);ctx.lineTo(5,34);ctx.lineTo(3,48+Math.sin(frame*.5)*4);ctx.fill();
+  function drawWalkthroughBuildings(){
+    if(!walkthroughBuildings) return;
+    for(const b of walkthroughBuildings){
+      if(!visible(b.x,b.w,180)) continue;
+      const x=sx(b.x);
+      const top=groundY-b.h;
+      const inside=playerInsideWalkthroughBuilding(b);
+      ctx.fillStyle=inside?'rgba(232,228,214,.96)':'rgba(214,218,216,.96)';
+      ctx.fillRect(x,top,b.w,b.h);
+      ctx.fillStyle='rgba(112,145,158,.42)';
+      for(let wx=x+28;wx<x+b.w-24;wx+=58) ctx.fillRect(wx,top+28,34,b.h-86);
+      ctx.strokeStyle='rgba(61,70,74,.55)';ctx.lineWidth=4;
+      const levels=Math.max(2,Math.floor(b.h/82));
+      for(let i=1;i<levels;i++){
+        const yy=top+i*(b.h/levels);
+        ctx.beginPath();ctx.moveTo(x+18,yy);ctx.lineTo(x+b.w-18,yy);ctx.stroke();
+      }
+      for(let cx=x+52;cx<x+b.w-28;cx+=96){
+        ctx.beginPath();ctx.moveTo(cx,top+18);ctx.lineTo(cx,groundY);ctx.stroke();
+      }
+      const doorW=116, doorX=x+b.w/2-doorW/2;
+      ctx.fillStyle='rgba(33,43,48,.25)';ctx.fillRect(doorX,groundY-96,doorW,96);
+      ctx.globalAlpha=inside?0.18:0.72;
+      ctx.fillStyle=b.tone===0?'#66757c':(b.tone===1?'#7d7467':'#65736a');
+      ctx.fillRect(x,top,b.w,b.h);
+      ctx.globalAlpha=1;
+      ctx.fillStyle='#f4f0df';ctx.font='700 13px system-ui';ctx.fillText(b.label,x+20,top+22);
     }
   }
 
-  // Only bring the tube into the hand during the X attack.
-  if(attacking){
-    const handX=player.facing===1?23:7;
-    const handY=23;
+  function drawWalkthroughForeground(){
+    if(!walkthroughBuildings) return;
+    for(const b of walkthroughBuildings){
+      if(!visible(b.x,b.w,120)) continue;
+      const x=sx(b.x), top=groundY-b.h;
+      const inside=playerInsideWalkthroughBuilding(b);
+      const doorW=116, doorX=x+b.w/2-doorW/2;
+      ctx.globalAlpha=inside?0.36:0.86;
+      ctx.fillStyle='#3f494e';
+      ctx.fillRect(x,top,14,b.h);ctx.fillRect(x+b.w-14,top,14,b.h);ctx.fillRect(x,top,b.w,10);
+      ctx.fillRect(doorX-8,groundY-104,8,104);ctx.fillRect(doorX+doorW,groundY-104,8,104);ctx.fillRect(doorX-8,groundY-104,doorW+16,8);
+      ctx.globalAlpha=1;
+    }
+  }
 
-    ctx.strokeStyle='#e3b18d';ctx.lineWidth=4;ctx.lineCap='round';
-    ctx.beginPath();
-    ctx.moveTo(player.facing===1?21:9,21);
-    ctx.lineTo(handX,handY);
-    ctx.stroke();
+  function drawMudPuddles(){
+    for(const m of mudPuddles){
+      if(!visible(m.x,m.w,40)) continue;
+      const x=sx(m.x);
+      ctx.fillStyle='rgba(87,63,43,.82)';
+      ctx.beginPath();ctx.ellipse(x+m.w/2,groundY-2,m.w/2,m.h,0,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='rgba(168,139,96,.35)';
+      ctx.beginPath();ctx.ellipse(x+m.w*.36,groundY-5,m.w*.18,2.4,0,0,Math.PI*2);ctx.fill();
+    }
+  }
 
+  function drawStairs(){
+    for(const st of stairs){
+      if(!visible(st.x,st.w,60)) continue;
+      const x=sx(st.x);
+      ctx.fillStyle='#b7b2a6';ctx.fillRect(x,st.y,st.w,st.h);
+      ctx.strokeStyle='#696d6e';ctx.lineWidth=2;ctx.strokeRect(x,st.y,st.w,st.h);
+      ctx.fillStyle='rgba(255,255,255,.18)';ctx.fillRect(x+3,st.y+2,st.w-6,3);
+    }
+  }
+
+  function drawBossArena(){
+    if(cameraX<BOSS_ARENA_START-W) return;
+    const left=sx(BOSS_ARENA_START);
+    const right=sx(BOSS_ARENA_END);
+    ctx.fillStyle='rgba(210,186,124,.20)';ctx.fillRect(left,245,right-left,groundY-245);
+    ctx.strokeStyle='rgba(76,70,58,.35)';ctx.lineWidth=3;
+    for(let x=left+80;x<right;x+=120){ctx.beginPath();ctx.moveTo(x,265);ctx.lineTo(x,groundY);ctx.stroke();}
+    ctx.fillStyle='#2b3033';ctx.font='700 18px system-ui';ctx.fillText('FINAL EXCAVATION ZONE',left+36,284);
+  }
+
+  function drawBoss(){
+    if(!bossMode || !boss) return;
+    const x=sx(boss.x), y=boss.y;
     ctx.save();
-    ctx.translate(handX,handY);
-    if(player.facing===-1) ctx.scale(-1,1);
-    const phase=(11-player.attackTimer)/11;
-    const swing=-1.15 + phase*2.1;
-    ctx.rotate(swing);
-    ctx.lineCap='round';
-    ctx.strokeStyle='#1f80d4';ctx.lineWidth=7;
-    ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(38,0);ctx.stroke();
-    ctx.strokeStyle='#eaf6ff';ctx.lineWidth=2;
-    ctx.beginPath();ctx.moveTo(4,-2);ctx.lineTo(34,-2);ctx.stroke();
-    ctx.fillStyle='#f3f6f8';ctx.beginPath();ctx.arc(39,0,4,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#2d3336';ctx.fillRect(x+18,y+77,146,28);
+    ctx.fillStyle='#111619';
+    for(let i=0;i<5;i++){ctx.beginPath();ctx.arc(x+36+i*28,y+91,10,0,Math.PI*2);ctx.fill();}
+    ctx.fillStyle='#e4a72f';ctx.fillRect(x+38,y+43,110,42);
+    ctx.fillStyle='#f2b93f';ctx.fillRect(x+76,y+8,62,44);
+    ctx.fillStyle='#58717b';ctx.fillRect(x+86,y+16,39,27);
+    ctx.strokeStyle='#30383c';ctx.lineWidth=4;ctx.strokeRect(x+86,y+16,39,27);
+    ctx.fillStyle='#c98b22';ctx.fillRect(x+137,y+50,32,30);
+
+    const slam=boss.slamTimer>0;
+    const low=slam && boss.slamTimer<24;
+    const pivotX=x+54, pivotY=y+48;
+    const elbowX=x-8, elbowY=low?y+68:y+20;
+    const bucketX=x-82, bucketY=low?groundY-46:y+35;
+    ctx.strokeStyle='#d99a27';ctx.lineWidth=15;ctx.lineCap='round';
+    ctx.beginPath();ctx.moveTo(pivotX,pivotY);ctx.lineTo(elbowX,elbowY);ctx.lineTo(bucketX+34,bucketY+15);ctx.stroke();
+    ctx.fillStyle='#b97920';ctx.beginPath();ctx.moveTo(bucketX,bucketY);ctx.lineTo(bucketX+56,bucketY+4);ctx.lineTo(bucketX+48,bucketY+39);ctx.lineTo(bucketX+8,bucketY+31);ctx.closePath();ctx.fill();
     ctx.restore();
   }
 
-  ctx.restore();
-}
+  function drawPlayer(){
+    const x=sx(player.x), y=player.y;
+    ctx.save();
+    ctx.translate(x,y);
+
+    const attacking=player.attackTimer>0;
+
+    if(!attacking){
+      ctx.save();
+      ctx.translate(15,22);
+      if(player.facing===-1) ctx.scale(-1,1);
+      ctx.rotate(-0.92);
+      ctx.lineCap='round';
+      ctx.strokeStyle='#155f9f';ctx.lineWidth=8;
+      ctx.beginPath();ctx.moveTo(-13,0);ctx.lineTo(20,0);ctx.stroke();
+      ctx.strokeStyle='#58aeea';ctx.lineWidth=5;
+      ctx.beginPath();ctx.moveTo(-11,0);ctx.lineTo(18,0);ctx.stroke();
+      ctx.fillStyle='#f3f6f8';
+      ctx.beginPath();ctx.arc(-14,0,4,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(21,0,4,0,Math.PI*2);ctx.fill();
+      ctx.restore();
+
+      ctx.strokeStyle='#6c4c2d';ctx.lineWidth=2;
+      ctx.beginPath();ctx.moveTo(9,15);ctx.lineTo(21,31);ctx.stroke();
+    }
+
+    const walking=Math.abs(player.vx)>0.22 && player.onGround;
+    const stride=walking?Math.sin(frame*0.42)*5.5:0;
+    const airborne=player.onGround?0:2.5;
+    ctx.strokeStyle='#18212a';ctx.lineWidth=5;ctx.lineCap='round';
+    ctx.beginPath();ctx.moveTo(11,33);ctx.lineTo(10+stride,42-airborne);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(19,33);ctx.lineTo(20-stride,42+airborne*.25);ctx.stroke();
+    ctx.lineWidth=4;
+    ctx.beginPath();ctx.moveTo(8+stride,43-airborne);ctx.lineTo(14+stride,43-airborne);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(18-stride,43+airborne*.25);ctx.lineTo(24-stride,43+airborne*.25);ctx.stroke();
+
+    ctx.fillStyle='#1d2d3c'; ctx.fillRect(6,13,18,23);
+    ctx.fillStyle='#e3b18d'; ctx.beginPath(); ctx.arc(15,8,7,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#f2f2f2'; ctx.fillRect(8,19,14,8);
+    ctx.fillStyle='#efb13d'; ctx.fillRect(6,0,18,4); ctx.fillRect(10,-4,10,5);
+
+    if(player.jetpack){
+      ctx.fillStyle='#ff6a35'; ctx.fillRect(0,16,6,18);
+      if(keys[' ']){
+        ctx.fillStyle='#ffd15d';
+        ctx.beginPath();
+        ctx.moveTo(1,34);ctx.lineTo(5,34);ctx.lineTo(3,48+Math.sin(frame*.5)*4);ctx.fill();
+      }
+    }
+
+    if(attacking){
+      const handX=player.facing===1?23:7;
+      const handY=23;
+
+      ctx.strokeStyle='#e3b18d';ctx.lineWidth=4;ctx.lineCap='round';
+      ctx.beginPath();
+      ctx.moveTo(player.facing===1?21:9,21);
+      ctx.lineTo(handX,handY);
+      ctx.stroke();
+
+      ctx.save();
+      ctx.translate(handX,handY);
+      if(player.facing===-1) ctx.scale(-1,1);
+      const phase=(11-player.attackTimer)/11;
+      const swing=-1.15 + phase*2.1;
+      ctx.rotate(swing);
+      ctx.lineCap='round';
+      ctx.strokeStyle='#1f80d4';ctx.lineWidth=7;
+      ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(38,0);ctx.stroke();
+      ctx.strokeStyle='#eaf6ff';ctx.lineWidth=2;
+      ctx.beginPath();ctx.moveTo(4,-2);ctx.lineTo(34,-2);ctx.stroke();
+      ctx.fillStyle='#f3f6f8';ctx.beginPath();ctx.arc(39,0,4,0,Math.PI*2);ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
 
   function render(){
     ctx.setTransform(1,0,0,1,0,0);
@@ -474,11 +905,16 @@
     ctx.clearRect(0,0,W,H);
 
     drawSkyline();
+    drawWalkthroughBuildings();
+    drawBossArena();
 
     ctx.fillStyle='#464d53';
     ctx.fillRect(0,groundY,W,H-groundY);
     ctx.fillStyle='#626b71';
     ctx.fillRect(0,groundY,W,5);
+
+    drawMudPuddles();
+    drawStairs();
 
     for(const p of platforms){
       if(!visible(p.x,p.w)) continue;
@@ -550,13 +986,29 @@
     }
     ctx.globalAlpha=1;
 
+    drawBoss();
     drawPlayer();
+    drawWalkthroughForeground();
 
     ctx.fillStyle='rgba(10,14,18,.78)';ctx.fillRect(16,16,300,62);
     ctx.fillStyle='#fff';ctx.font='bold 17px system-ui';
     ctx.fillText(`Blueprints ${score}   Money $${money}`,30,42);
     ctx.font='14px system-ui';
     ctx.fillText(`Lives ${'♥'.repeat(Math.max(0,player.lives))}   ${player.jetpack?'Jetpack ✓':'Find the jetpack'}`,30,65);
+
+    if(bossMode && boss){
+      ctx.fillStyle='rgba(12,15,17,.82)';ctx.fillRect(W/2-190,18,380,46);
+      ctx.fillStyle='#fff';ctx.font='700 13px system-ui';ctx.fillText('EXCAVATOR BOSS',W/2-170,36);
+      ctx.fillStyle='#3a4145';ctx.fillRect(W/2-170,44,340,10);
+      ctx.fillStyle='#f0a62d';ctx.fillRect(W/2-170,44,340*(boss.hp/boss.maxHp),10);
+    }
+
+    if(bossMode && bossIntroTimer>0){
+      ctx.fillStyle='rgba(0,0,0,.55)';ctx.fillRect(0,0,W,H);
+      ctx.textAlign='center';ctx.fillStyle='#fff';ctx.font='700 38px system-ui';ctx.fillText('PROJECT DELIVERED!',W/2,H/2-28);
+      ctx.font='700 24px system-ui';ctx.fillStyle='#f2b94b';ctx.fillText('BOSS LEVEL: EXCAVATOR',W/2,H/2+12);
+      ctx.font='16px system-ui';ctx.fillStyle='#fff';ctx.fillText('Use the blueprint tube. Avoid the bucket.',W/2,H/2+46);ctx.textAlign='left';
+    }
 
     if(flash){
       ctx.fillStyle=`rgba(255,65,50,${flash/45})`;
@@ -566,12 +1018,12 @@
     if(gameOver || win){
       ctx.fillStyle='rgba(0,0,0,.7)';ctx.fillRect(0,0,W,H);
       ctx.textAlign='center';ctx.fillStyle='#fff';ctx.font='700 44px system-ui';
-      ctx.fillText(win?'PROJECT DELIVERED!':'GAME OVER — OSHA FAIL',W/2,H/2-10);
-      ctx.font='18px system-ui';ctx.fillText('Press R to restart',W/2,H/2+28);
+      ctx.fillText(win?'EXCAVATOR DEFEATED!':'GAME OVER — OSHA FAIL',W/2,H/2-10);
+      ctx.font='18px system-ui';ctx.fillText(win?'Project delivered — final site cleared. Press R to replay':'Press R to restart',W/2,H/2+28);
       ctx.textAlign='left';
     }
 
-    stats.innerHTML=`<span>📜 ${score} blueprints</span><span>💰 $${money}</span><span>🗞️ X = blueprint tube</span><span>❤️ ${Math.max(0,player.lives)} lives</span><span>📍 ${Math.round(player.x)} / ${WORLD_W}</span>`;
+    stats.innerHTML=`<span>📜 ${score} blueprints</span><span>💰 $${money}</span><span>🗞️ X = blueprint tube</span><span>🟫 mud slows you</span><span>❤️ ${Math.max(0,player.lives)} lives</span><span>📍 ${Math.round(player.x)} / ${WORLD_W}</span>`;
   }
 
   function loop(){
