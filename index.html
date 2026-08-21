@@ -82,7 +82,6 @@
     debris = [];
     jetpacks = [];
 
-    // Ground islands / slabs.
     for(let i=0;i<52;i++){
       const x = 120 + i*195;
       const y = 390 - seededNoise(i)*145;
@@ -92,7 +91,6 @@
       if(i%2===1) coins.push({x:x+w*.55,y:y-32,w:14,h:14,collected:false});
     }
 
-    // Some larger architectural terraces.
     [1450,3150,5050,7000,8850].forEach((x,i)=>{
       platforms.push({x,y:310-(i%2)*55,w:430,h:22,type:4});
       checkpoints.push({x:x+360,y:235-(i%2)*55,w:24,h:75,active:false});
@@ -152,12 +150,10 @@
     player.x = clamp(player.x,0,WORLD_W-player.w);
     player.onGround=false;
 
-    // Ground.
     if(player.y+player.h>=groundY && prevY+player.h<=groundY+12){
       player.y=groundY-player.h; player.vy=0; player.onGround=true; player.jumpsUsed=0;
     }
 
-    // One-way platform collision from above.
     for(const p of platforms){
       if(player.x+player.w>p.x && player.x<p.x+p.w && player.y+player.h>=p.y && prevY+player.h<=p.y+8 && player.vy>=0){
         player.y=p.y-player.h; player.vy=0; player.onGround=true; player.jumpsUsed=0;
@@ -220,10 +216,9 @@
   }
 
   function drawPlayer(){
-    const x=player.x-cameraX,y=player.y;
+    const x=player.x,y=player.y;
     ctx.save();
     ctx.translate(x,y);
-    // architect body
     ctx.fillStyle='#1d2d3c'; ctx.fillRect(6,13,18,23);
     ctx.fillStyle='#e3b18d'; ctx.beginPath(); ctx.arc(15,8,7,0,Math.PI*2); ctx.fill();
     ctx.fillStyle='#f2f2f2'; ctx.fillRect(8,19,14,8);
@@ -236,7 +231,6 @@
   function render(){
     skyline();
 
-    // Far construction cranes.
     ctx.save(); ctx.translate(-cameraX*.35,0); ctx.strokeStyle='rgba(45,61,72,.38)'; ctx.lineWidth=5;
     for(let x=450;x<WORLD_W*.4;x+=1200){
       ctx.beginPath();ctx.moveTo(x,80);ctx.lineTo(x,430);ctx.moveTo(x-140,105);ctx.lineTo(x+210,105);ctx.moveTo(x,105);ctx.lineTo(x+180,180);ctx.stroke();
@@ -245,11 +239,9 @@
 
     ctx.save(); ctx.translate(-cameraX,0);
 
-    // ground
     ctx.fillStyle='#464d53';ctx.fillRect(0,groundY,WORLD_W,H-groundY);
     ctx.fillStyle='#626b71';ctx.fillRect(0,groundY,WORLD_W,5);
 
-    // platforms
     for(const p of platforms){
       ctx.fillStyle=p.type===4?'#e5e2d8':(p.type%2?'#d8d3c5':'#c9c5b9');
       ctx.fillRect(p.x,p.y,p.w,p.h);
@@ -258,20 +250,17 @@
       for(let xx=p.x+18;xx<p.x+p.w-10;xx+=32)ctx.fillRect(xx,p.y+5,3,p.h-5);
     }
 
-    // hazards
     for(const h of hazards){
       ctx.fillStyle='#ee5c44';ctx.fillRect(h.x,h.y,h.w,h.h);
       ctx.fillStyle='#222';for(let i=0;i<4;i++)ctx.fillRect(h.x+i*14,h.y,7,h.h);
     }
 
-    // checkpoints
     for(const c of checkpoints){
       ctx.fillStyle='#29333a';ctx.fillRect(c.x,c.y,c.w,c.h);
       ctx.fillStyle=c.active?'#66ef89':'#f2b94b';ctx.fillRect(c.x+c.w,c.y+7,46,24);
       ctx.fillStyle='#151a1e';ctx.font='12px system-ui';ctx.fillText(c.active?'SAFE':'SITE',c.x+c.w+7,c.y+23);
     }
 
-    // enemies: inspection drones
     for(const e of enemies){
       ctx.fillStyle='#222a30';ctx.fillRect(e.x,e.y,e.w,e.h);
       ctx.fillStyle='#f55';ctx.fillRect(e.x+7,e.y+10,6,6);ctx.fillRect(e.x+21,e.y+10,6,6);
@@ -300,7 +289,6 @@
     ctx.globalAlpha=1;
     ctx.restore();
 
-    // overlay HUD inside canvas
     ctx.fillStyle='rgba(10,14,18,.78)';ctx.fillRect(16,16,300,62);
     ctx.fillStyle='#fff';ctx.font='bold 17px system-ui';ctx.fillText(`Blueprints ${score}   Money $${money}`,30,42);
     ctx.font='14px system-ui';ctx.fillText(`Lives ${'♥'.repeat(Math.max(0,player.lives))}   ${player.jetpack?'Jetpack ✓':'Find the jetpack'}`,30,65);
