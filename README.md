@@ -1,12 +1,10 @@
 # Arch in Danger
 
-A recovered and completed browser prototype based on the original **Architect City Quest v2** file that had been deleted from this repository.
+A recovered and completed browser game based on the original **Architect City Quest v2** prototype from this repository.
 
-## Play it
+## Play the full game
 
-Open the rendered preview:
-
-https://html-preview.github.io/?url=https://github.com/andreread-vasconcelos/Arch-in-danger/blob/main/index.html
+**Live site:** https://andreread-vasconcelos.github.io/Arch-in-danger/
 
 Controls:
 
@@ -21,6 +19,6 @@ Goal: collect blueprints and money, avoid construction hazards and inspection dr
 
 The original repository history contained an incomplete HTML canvas game called **Arch in danger / architect-city-quest**. The file ended midway through the `update()` function, so it could not run. `index.html` restores that concept as a self-contained playable browser game.
 
-## GitHub Pages
+## Deployment
 
-The project is GitHub Pages-ready because the playable site is at the repository root as `index.html`. To give it a permanent `github.io` URL, enable Pages in **Settings → Pages** and deploy from the `main` branch / root folder.
+The game is deployed automatically to GitHub Pages from the `main` branch by `.github/workflows/pages.yml`. Every future push to `main` republishes the site.
