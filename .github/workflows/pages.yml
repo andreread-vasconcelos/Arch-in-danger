@@ -24,31 +24,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Apply boss, stairs, interiors and animated legs
-        run: |
-          git apply --check .github/patches/boss_features.patch
-          git apply .github/patches/boss_features.patch
-
-      - name: Fix browser audio playback
-        run: python .github/scripts/fix_audio.py
-
-      - name: Add phone touch controls
-        run: python .github/scripts/add_mobile_controls.py
-
-      - name: Guarantee excavator boss transition
-        run: python .github/scripts/ensure_boss_transition.py
-
-      - name: Tune jetpack flight
-        run: python .github/scripts/tune_jetpack.py
-
-      - name: Verify final game build
-        run: |
-          grep -q "BOSS LEVEL: EXCAVATOR" index.html
-          grep -q "startBossLevel" index.html
-          grep -q "mobileControls" index.html
-          grep -q "runWithAudio" index.html
-          grep -q "player.y < 38" index.html
-
       - name: Configure Pages
         uses: actions/configure-pages@v5
         with:
