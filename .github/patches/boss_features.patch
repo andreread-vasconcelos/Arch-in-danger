@@ -1,0 +1,444 @@
+--- a/index.html
++++ b/index.html
+@@ -28,7 +28,7 @@
+       <h1>🏗️ Arch in Danger</h1>
+       <div class="sub">Architect City Quest — collect blueprints, survive the site, reach the next checkpoint.</div>
+     </div>
+-    <div class="pill">Stable camera build</div>
++    <div class="pill">Boss + interiors build</div>
+   </div>
+ 
+   <div class="game-shell">
+@@ -48,7 +48,10 @@
+ 
+   const W = canvas.width;
+   const H = canvas.height;
+-  const WORLD_W = 10400;
++  const NORMAL_WORLD_END = 10150;
++  const BOSS_ARENA_START = 10450;
++  const BOSS_ARENA_END = 12000;
++  const WORLD_W = 12100;
+   const gravity = 0.62;
+   const groundY = 505;
+   const keys = Object.create(null);
+@@ -63,8 +66,13 @@
+   let win = false;
+   let flash = 0;
+   let frame = 0;
++  let bossMode = false;
++  let bossDefeated = false;
++  let bossIntroTimer = 0;
++  let playerInvuln = 0;
++  let boss = null;
+ 
+-  let player, platforms, blueprints, hazards, enemies, coins, checkpoints, debris, jetpacks;
++  let player, platforms, blueprints, hazards, enemies, coins, checkpoints, debris, jetpacks, stairs, mudPuddles, walkthroughBuildings;
+ 
+   const clamp = (v,a,b) => Math.max(a, Math.min(b,v));
+   const rectHit = (a,b) => a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
+@@ -165,7 +173,13 @@
+   }
+ 
+   function buildLevel(){
+-    platforms=[]; blueprints=[]; hazards=[]; enemies=[]; coins=[]; checkpoints=[]; debris=[]; jetpacks=[];
++    platforms=[]; blueprints=[]; hazards=[]; enemies=[]; coins=[]; checkpoints=[]; debris=[]; jetpacks=[]; stairs=[]; mudPuddles=[];
++
++    walkthroughBuildings=[
++      {x:1180,w:430,h:235,label:'STUDIO',tone:0},
++      {x:4050,w:520,h:285,label:'CIVIC HALL',tone:1},
++      {x:7650,w:470,h:255,label:'DESIGN LAB',tone:2}
++    ];
+ 
+     for(let i=0;i<52;i++){
+       const x=120+i*195;
+@@ -187,10 +201,28 @@
+     }
+ 
+     for(let i=0;i<14;i++){
+-      enemies.push({
++      const enemy={
+         x:850+i*650,y:groundY-34,w:34,h:34,dir:i%2?1:-1,
+         minX:700+i*650,maxX:1080+i*650,alive:true
+-      });
++      };
++      enemies.push(enemy);
++      if(i%2===0){
++        mudPuddles.push({x:enemy.x-46,y:groundY-7,w:126,h:12});
++      }
++    }
++
++    // Architectural stair moments: real walkable steps, not just background decoration.
++    const stairSpecs=[
++      {x:1900,count:5,dir:1},
++      {x:3500,count:6,dir:-1},
++      {x:5900,count:5,dir:1},
++      {x:8350,count:6,dir:-1}
++    ];
++    for(const spec of stairSpecs){
++      for(let i=0;i<spec.count;i++){
++        const riseIndex=spec.dir===1?i:(spec.count-1-i);
++        stairs.push({x:spec.x+i*40,y:groundY-18-riseIndex*18,w:42,h:18});
++      }
+     }
+ 
+     jetpacks.push({x:2650,y:230,w:28,h:34,collected:false});
+@@ -198,7 +230,7 @@
+   }
+ 
+   function resetGame(){
+-    cameraX=0; score=0; money=0; gameOver=false; win=false; flash=0; frame=0;
++    cameraX=0; score=0; money=0; gameOver=false; win=false; flash=0; frame=0; bossMode=false; bossDefeated=false; bossIntroTimer=0; playerInvuln=0; boss=null;
+     player={x:70,y:360,w:30,h:44,vx:0,vy:0,onGround:false,lives:3,jetpack:false,lastCheckpoint:70,jumpsUsed:0,facing:1,attackTimer:0,attackImpactPlayed:false};
+     jumpPressed=false;
+     attackPressed=false;
+@@ -209,6 +241,40 @@
+     cameraX = clamp(player.x - W*0.30, 0, WORLD_W-W);
+   }
+ 
++  function startBossLevel(){
++    if(bossMode || bossDefeated) return;
++    bossMode=true;
++    bossIntroTimer=165;
++    player.x=BOSS_ARENA_START+120;
++    player.y=groundY-player.h;
++    player.vx=0; player.vy=0;
++    player.lastCheckpoint=BOSS_ARENA_START+120;
++    player.jumpsUsed=0;
++    boss={
++      x:BOSS_ARENA_END-390,
++      y:groundY-108,
++      w:178,h:108,
++      hp:10,maxHp:10,
++      dir:-1,
++      attackCooldown:90,
++      slamTimer:0,
++      hitCooldown:0
++    };
++    cameraX=clamp(BOSS_ARENA_START-80,0,WORLD_W-W);
++  }
++
++  function bossBucketBox(){
++    if(!boss) return {x:-9999,y:-9999,w:1,h:1};
++    const slamming=boss.slamTimer>0;
++    const low=slamming && boss.slamTimer<24;
++    return {
++      x:boss.x-104,
++      y:low?groundY-58:boss.y+28,
++      w:88,
++      h:low?58:48
++    };
++  }
++
+   function respawn(){
+     player.lives--;
+     flash=18;
+@@ -223,6 +289,7 @@
+     jumpPressed=false;
+     attackPressed=false;
+     snapCameraToPlayer();
++    playerInvuln=55;
+   }
+ 
+   function addDebris(x,y,color){
+@@ -240,6 +307,12 @@
+     if(keys.ArrowLeft) player.facing=-1;
+     if(Math.abs(player.vx)<0.08) player.vx=0;
+ 
++    // Mud puddles around some enemies slow movement but do not hurt the architect.
++    const footBox={x:player.x+5,y:player.y+player.h-7,w:player.w-10,h:9};
++    for(const m of mudPuddles){
++      if(rectHit(footBox,m)){ player.vx*=0.50; break; }
++    }
++
+     if(attackPressed && player.attackTimer<=0){
+       player.attackTimer=11;
+       player.attackImpactPlayed=false;
+@@ -273,6 +346,17 @@
+       player.jumpsUsed=0;
+     }
+ 
++    // Step-up logic lets the architect actually walk the shallow stairs.
++    for(const st of stairs){
++      const feet=player.y+player.h;
++      if(player.x+player.w>st.x && player.x<st.x+st.w && player.vy>=0 && feet>=st.y-5 && feet<=st.y+24){
++        player.y=st.y-player.h;
++        player.vy=0;
++        player.onGround=true;
++        player.jumpsUsed=0;
++      }
++    }
++
+     for(const p of platforms){
+       if(player.x+player.w>p.x && player.x<p.x+p.w &&
+          player.y+player.h>=p.y && prevY+player.h<=p.y+8 && player.vy>=0){
+@@ -326,6 +410,22 @@
+           hitSomething=true;
+         }
+       }
++      if(bossMode && boss && bossIntroTimer<=0 && boss.hitCooldown<=0 && rectHit(attackBox,boss)){
++        boss.hp--;
++        boss.hitCooldown=18;
++        addDebris(boss.x+20,boss.y+45,'#f2b134');
++        addDebris(boss.x+40,boss.y+60,'#393f43');
++        money+=75;
++        hitSomething=true;
++        if(boss.hp<=0){
++          bossDefeated=true;
++          bossMode=false;
++          money+=1000;
++          addDebris(boss.x+boss.w/2,boss.y+boss.h/2,'#f2b134');
++          addDebris(boss.x+boss.w/2,boss.y+boss.h/2,'#222a30');
++          win=true;
++        }
++      }
+       if(hitSomething && !player.attackImpactPlayed){
+         playBlueprintImpact();
+         player.attackImpactPlayed=true;
+@@ -344,7 +444,40 @@
+     }
+ 
+     if(player.y>H+180) respawn();
+-    if(player.x>WORLD_W-250) win=true;
++
++    // Delivering the project unlocks a final excavator boss arena instead of ending immediately.
++    if(!bossMode && !bossDefeated && player.x>NORMAL_WORLD_END){
++      startBossLevel();
++    }
++
++    if(playerInvuln>0) playerInvuln--;
++
++    if(bossMode && boss){
++      if(bossIntroTimer>0){
++        bossIntroTimer--;
++      }else{
++        if(boss.hitCooldown>0) boss.hitCooldown--;
++        if(boss.slamTimer>0){
++          boss.slamTimer--;
++        }else{
++          boss.attackCooldown--;
++          if(boss.attackCooldown<=0){
++            boss.slamTimer=48;
++            boss.attackCooldown=95+Math.floor(Math.random()*55);
++          }else{
++            const targetX=clamp(player.x+260,BOSS_ARENA_START+500,BOSS_ARENA_END-250);
++            boss.x += Math.sign(targetX-boss.x)*0.72;
++          }
++        }
++        boss.x=clamp(boss.x,BOSS_ARENA_START+500,BOSS_ARENA_END-boss.w-40);
++
++        const bucket=bossBucketBox();
++        const dangerousBucket=boss.slamTimer>0 && boss.slamTimer<24;
++        if(playerInvuln<=0 && (rectHit(player,boss) || (dangerousBucket && rectHit(player,bucket)))){
++          respawn();
++        }
++      }
++    }
+ 
+     for(const d of debris){
+       d.x+=d.vx; d.y+=d.vy; d.vy+=.18; d.life--;
+@@ -398,6 +531,115 @@
+     }
+   }
+ 
++  function playerInsideWalkthroughBuilding(b){
++    const cx=player.x+player.w/2;
++    return cx>b.x+18 && cx<b.x+b.w-18 && player.y+player.h>groundY-b.h+24;
++  }
++
++  function drawWalkthroughBuildings(){
++    if(!walkthroughBuildings) return;
++    for(const b of walkthroughBuildings){
++      if(!visible(b.x,b.w,180)) continue;
++      const x=sx(b.x);
++      const top=groundY-b.h;
++      const inside=playerInsideWalkthroughBuilding(b);
++      ctx.fillStyle=inside?'rgba(232,228,214,.96)':'rgba(214,218,216,.96)';
++      ctx.fillRect(x,top,b.w,b.h);
++      ctx.fillStyle='rgba(112,145,158,.42)';
++      for(let wx=x+28;wx<x+b.w-24;wx+=58) ctx.fillRect(wx,top+28,34,b.h-86);
++      ctx.strokeStyle='rgba(61,70,74,.55)';ctx.lineWidth=4;
++      const levels=Math.max(2,Math.floor(b.h/82));
++      for(let i=1;i<levels;i++){
++        const yy=top+i*(b.h/levels);
++        ctx.beginPath();ctx.moveTo(x+18,yy);ctx.lineTo(x+b.w-18,yy);ctx.stroke();
++      }
++      for(let cx=x+52;cx<x+b.w-28;cx+=96){
++        ctx.beginPath();ctx.moveTo(cx,top+18);ctx.lineTo(cx,groundY);ctx.stroke();
++      }
++      const doorW=116, doorX=x+b.w/2-doorW/2;
++      ctx.fillStyle='rgba(33,43,48,.25)';ctx.fillRect(doorX,groundY-96,doorW,96);
++      ctx.globalAlpha=inside?0.18:0.72;
++      ctx.fillStyle=b.tone===0?'#66757c':(b.tone===1?'#7d7467':'#65736a');
++      ctx.fillRect(x,top,b.w,b.h);
++      ctx.globalAlpha=1;
++      ctx.fillStyle='#f4f0df';ctx.font='700 13px system-ui';ctx.fillText(b.label,x+20,top+22);
++    }
++  }
++
++  function drawWalkthroughForeground(){
++    if(!walkthroughBuildings) return;
++    for(const b of walkthroughBuildings){
++      if(!visible(b.x,b.w,120)) continue;
++      const x=sx(b.x), top=groundY-b.h;
++      const inside=playerInsideWalkthroughBuilding(b);
++      const doorW=116, doorX=x+b.w/2-doorW/2;
++      ctx.globalAlpha=inside?0.36:0.86;
++      ctx.fillStyle='#3f494e';
++      ctx.fillRect(x,top,14,b.h);ctx.fillRect(x+b.w-14,top,14,b.h);ctx.fillRect(x,top,b.w,10);
++      ctx.fillRect(doorX-8,groundY-104,8,104);ctx.fillRect(doorX+doorW,groundY-104,8,104);ctx.fillRect(doorX-8,groundY-104,doorW+16,8);
++      ctx.globalAlpha=1;
++    }
++  }
++
++  function drawMudPuddles(){
++    for(const m of mudPuddles){
++      if(!visible(m.x,m.w,40)) continue;
++      const x=sx(m.x);
++      ctx.fillStyle='rgba(87,63,43,.82)';
++      ctx.beginPath();ctx.ellipse(x+m.w/2,groundY-2,m.w/2,m.h,0,0,Math.PI*2);ctx.fill();
++      ctx.fillStyle='rgba(168,139,96,.35)';
++      ctx.beginPath();ctx.ellipse(x+m.w*.36,groundY-5,m.w*.18,2.4,0,0,Math.PI*2);ctx.fill();
++    }
++  }
++
++  function drawStairs(){
++    for(const st of stairs){
++      if(!visible(st.x,st.w,60)) continue;
++      const x=sx(st.x);
++      ctx.fillStyle='#b7b2a6';ctx.fillRect(x,st.y,st.w,st.h);
++      ctx.strokeStyle='#696d6e';ctx.lineWidth=2;ctx.strokeRect(x,st.y,st.w,st.h);
++      ctx.fillStyle='rgba(255,255,255,.18)';ctx.fillRect(x+3,st.y+2,st.w-6,3);
++    }
++  }
++
++  function drawBossArena(){
++    if(cameraX<BOSS_ARENA_START-W) return;
++    const left=sx(BOSS_ARENA_START);
++    const right=sx(BOSS_ARENA_END);
++    ctx.fillStyle='rgba(210,186,124,.20)';ctx.fillRect(left,245,right-left,groundY-245);
++    ctx.strokeStyle='rgba(76,70,58,.35)';ctx.lineWidth=3;
++    for(let x=left+80;x<right;x+=120){ctx.beginPath();ctx.moveTo(x,265);ctx.lineTo(x,groundY);ctx.stroke();}
++    ctx.fillStyle='#2b3033';ctx.font='700 18px system-ui';ctx.fillText('FINAL EXCAVATION ZONE',left+36,284);
++  }
++
++  function drawBoss(){
++    if(!bossMode || !boss) return;
++    const x=sx(boss.x), y=boss.y;
++    ctx.save();
++    // tracks
++    ctx.fillStyle='#2d3336';ctx.fillRect(x+18,y+77,146,28);
++    ctx.fillStyle='#111619';
++    for(let i=0;i<5;i++){ctx.beginPath();ctx.arc(x+36+i*28,y+91,10,0,Math.PI*2);ctx.fill();}
++    // body + cab
++    ctx.fillStyle='#e4a72f';ctx.fillRect(x+38,y+43,110,42);
++    ctx.fillStyle='#f2b93f';ctx.fillRect(x+76,y+8,62,44);
++    ctx.fillStyle='#58717b';ctx.fillRect(x+86,y+16,39,27);
++    ctx.strokeStyle='#30383c';ctx.lineWidth=4;ctx.strokeRect(x+86,y+16,39,27);
++    // counterweight
++    ctx.fillStyle='#c98b22';ctx.fillRect(x+137,y+50,32,30);
++
++    // boom and bucket, animated for slam attack
++    const slam=boss.slamTimer>0;
++    const low=slam && boss.slamTimer<24;
++    const pivotX=x+54, pivotY=y+48;
++    const elbowX=x-8, elbowY=low?y+68:y+20;
++    const bucketX=x-82, bucketY=low?groundY-46:y+35;
++    ctx.strokeStyle='#d99a27';ctx.lineWidth=15;ctx.lineCap='round';
++    ctx.beginPath();ctx.moveTo(pivotX,pivotY);ctx.lineTo(elbowX,elbowY);ctx.lineTo(bucketX+34,bucketY+15);ctx.stroke();
++    ctx.fillStyle='#b97920';ctx.beginPath();ctx.moveTo(bucketX,bucketY);ctx.lineTo(bucketX+56,bucketY+4);ctx.lineTo(bucketX+48,bucketY+39);ctx.lineTo(bucketX+8,bucketY+31);ctx.closePath();ctx.fill();
++    ctx.restore();
++  }
++
+   function drawPlayer(){
+     const x=sx(player.x), y=player.y;
+     ctx.save();
+@@ -427,12 +669,22 @@
+       ctx.beginPath();ctx.moveTo(9,15);ctx.lineTo(21,31);ctx.stroke();
+     }
+ 
++    // Animated legs make forward and backward movement read as walking.
++    const walking=Math.abs(player.vx)>0.22 && player.onGround;
++    const stride=walking?Math.sin(frame*0.42)*5.5:0;
++    const airborne=player.onGround?0:2.5;
++    ctx.strokeStyle='#18212a';ctx.lineWidth=5;ctx.lineCap='round';
++    ctx.beginPath();ctx.moveTo(11,33);ctx.lineTo(10+stride,42-airborne);ctx.stroke();
++    ctx.beginPath();ctx.moveTo(19,33);ctx.lineTo(20-stride,42+airborne*.25);ctx.stroke();
++    ctx.lineWidth=4;
++    ctx.beginPath();ctx.moveTo(8+stride,43-airborne);ctx.lineTo(14+stride,43-airborne);ctx.stroke();
++    ctx.beginPath();ctx.moveTo(18-stride,43+airborne*.25);ctx.lineTo(24-stride,43+airborne*.25);ctx.stroke();
++
+     // Architect body.
+     ctx.fillStyle='#1d2d3c'; ctx.fillRect(6,13,18,23);
+     ctx.fillStyle='#e3b18d'; ctx.beginPath(); ctx.arc(15,8,7,0,Math.PI*2); ctx.fill();
+     ctx.fillStyle='#f2f2f2'; ctx.fillRect(8,19,14,8);
+     ctx.fillStyle='#efb13d'; ctx.fillRect(6,0,18,4); ctx.fillRect(10,-4,10,5);
+-    ctx.fillStyle='#18212a'; ctx.fillRect(7,35,7,9); ctx.fillRect(17,35,7,9);
+ 
+     if(player.jetpack){
+       ctx.fillStyle='#ff6a35'; ctx.fillRect(0,16,6,18);
+@@ -481,6 +733,8 @@
+     ctx.clearRect(0,0,W,H);
+ 
+     drawSkyline();
++    drawWalkthroughBuildings();
++    drawBossArena();
+ 
+     // Ground is screen-wide on purpose. It cannot scroll out of view.
+     ctx.fillStyle='#464d53';
+@@ -488,6 +742,9 @@
+     ctx.fillStyle='#626b71';
+     ctx.fillRect(0,groundY,W,5);
+ 
++    drawMudPuddles();
++    drawStairs();
++
+     for(const p of platforms){
+       if(!visible(p.x,p.w)) continue;
+       const x=sx(p.x);
+@@ -558,7 +815,9 @@
+     }
+     ctx.globalAlpha=1;
+ 
++    drawBoss();
+     drawPlayer();
++    drawWalkthroughForeground();
+ 
+     ctx.fillStyle='rgba(10,14,18,.78)';ctx.fillRect(16,16,300,62);
+     ctx.fillStyle='#fff';ctx.font='bold 17px system-ui';
+@@ -566,6 +825,20 @@
+     ctx.font='14px system-ui';
+     ctx.fillText(`Lives ${'♥'.repeat(Math.max(0,player.lives))}   ${player.jetpack?'Jetpack ✓':'Find the jetpack'}`,30,65);
+ 
++    if(bossMode && boss){
++      ctx.fillStyle='rgba(12,15,17,.82)';ctx.fillRect(W/2-190,18,380,46);
++      ctx.fillStyle='#fff';ctx.font='700 13px system-ui';ctx.fillText('EXCAVATOR BOSS',W/2-170,36);
++      ctx.fillStyle='#3a4145';ctx.fillRect(W/2-170,44,340,10);
++      ctx.fillStyle='#f0a62d';ctx.fillRect(W/2-170,44,340*(boss.hp/boss.maxHp),10);
++    }
++
++    if(bossMode && bossIntroTimer>0){
++      ctx.fillStyle='rgba(0,0,0,.55)';ctx.fillRect(0,0,W,H);
++      ctx.textAlign='center';ctx.fillStyle='#fff';ctx.font='700 38px system-ui';ctx.fillText('PROJECT DELIVERED!',W/2,H/2-28);
++      ctx.font='700 24px system-ui';ctx.fillStyle='#f2b94b';ctx.fillText('FINAL PROBLEM: EXCAVATOR',W/2,H/2+12);
++      ctx.font='16px system-ui';ctx.fillStyle='#fff';ctx.fillText('Use the blueprint tube. Avoid the bucket.',W/2,H/2+46);ctx.textAlign='left';
++    }
++
+     if(flash){
+       ctx.fillStyle=`rgba(255,65,50,${flash/45})`;
+       ctx.fillRect(0,0,W,H);
+@@ -574,12 +847,12 @@
+     if(gameOver || win){
+       ctx.fillStyle='rgba(0,0,0,.7)';ctx.fillRect(0,0,W,H);
+       ctx.textAlign='center';ctx.fillStyle='#fff';ctx.font='700 44px system-ui';
+-      ctx.fillText(win?'PROJECT DELIVERED!':'GAME OVER — OSHA FAIL',W/2,H/2-10);
+-      ctx.font='18px system-ui';ctx.fillText('Press R to restart',W/2,H/2+28);
++      ctx.fillText(win?'EXCAVATOR DEFEATED!':'GAME OVER — OSHA FAIL',W/2,H/2-10);
++      ctx.font='18px system-ui';ctx.fillText(win?'Project delivered — final site cleared. Press R to replay':'Press R to restart',W/2,H/2+28);
+       ctx.textAlign='left';
+     }
+ 
+-    stats.innerHTML=`<span>📜 ${score} blueprints</span><span>💰 $${money}</span><span>🗞️ X = blueprint tube</span><span>❤️ ${Math.max(0,player.lives)} lives</span><span>📍 ${Math.round(player.x)} / ${WORLD_W}</span>`;
++    stats.innerHTML=`<span>📜 ${score} blueprints</span><span>💰 $${money}</span><span>🗞️ X = blueprint tube</span><span>🟫 mud slows you</span><span>❤️ ${Math.max(0,player.lives)} lives</span><span>📍 ${Math.round(player.x)} / ${WORLD_W}</span>`;
+   }
+ 
+   function loop(){
